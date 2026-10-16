@@ -3,4 +3,5 @@
 
 pub mod config;
 pub mod lldap;
+pub mod repo;
 pub mod validation;
