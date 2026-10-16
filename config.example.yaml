@@ -1,0 +1,48 @@
+# Copy to config.yaml (or point APP_CONFIG at another path).
+# Any value can be overridden with environment variables shaped like
+# APP__SECTION__KEY, e.g. APP__LDAP__PASSWORD=... - use that for secrets.
+
+server:
+  # Externally visible origin; POSTs from any other Origin are refused (CSRF).
+  # Must match exactly what the browser shows, e.g. http://127.0.0.1:3000 locally.
+  public_url: https://account.dyslexicevo.dev
+  # Honour X-Forwarded-For for the client IP. Only enable behind Caddy.
+  trust_proxy_headers: true
+
+database:
+  url: sqlite://./data/account-manager.db
+
+ldap:
+  http_url: http://lldap:17170
+  ldap_url: ldap://lldap:3890
+  use_tls: false
+  tls_insecure_skip_verify: false
+  # tls_ca_file: /path/to/custom-ca.pem
+  base_dn: dc=dyslexicevo,dc=dev
+  # Service account allowed to create users and set passwords
+  # (member of lldap_admin or lldap_password_manager).
+  username: account-manager
+  password: change-me  # prefer APP__LDAP__PASSWORD
+
+invites:
+  expiration_hours: 48
+
+session:
+  cookie_name: am_session
+  # false only for local development over plain HTTP
+  secure_cookie: true
+  idle_timeout_minutes: 60
+  absolute_timeout_hours: 12
+
+auth:
+  # LLDAP group whose members see the admin pages
+  admin_group: admins
+  login_max_attempts: 5
+  login_window_minutes: 15
+
+password_policy:
+  minimum_length: 12
+  require_uppercase: true
+  require_lowercase: true
+  require_number: true
+  require_special: true

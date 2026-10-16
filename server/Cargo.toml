@@ -7,12 +7,17 @@ edition = "2021"
 
 [dependencies]
 app = { path = "../app", default-features = false, features = ["ssr"] }
+backend.workspace = true
 leptos = { workspace = true, features = [ "ssr" ]}
 leptos_axum.workspace = true
 
 axum.workspace = true
+chrono = "0.4"
 simple_logger.workspace = true
+time.workspace = true
 tokio.workspace = true
 tower.workspace = true
 tower-http.workspace = true
+tower-sessions.workspace = true
+tower-sessions-sqlx-store.workspace = true
 log.workspace = true

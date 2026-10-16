@@ -1,14 +1,22 @@
 [workspace]
 resolver = "2"
-members = ["app", "frontend", "server"]
+members = ["app", "backend", "frontend", "server"]
 
-# need to be applied only to wasm build
-[profile.release]
+# Size-optimised profile for the wasm bundle only (see lib-profile-release below);
+# the server binary uses the normal release profile.
+[profile.wasm-release]
+inherits = "release"
 codegen-units = 1
 lto = true
 opt-level = 'z'
 
 [workspace.dependencies]
+backend = { path = "backend" }
+serde = { version = "1.0", features = ["derive"] }
+time = "0.3"
+tower-sessions = "0.14"
+tower-sessions-sqlx-store = { version = "0.15", features = ["sqlite"] }
+
 leptos = { version = "0.8.2" }
 leptos_meta = { version = "0.8.2" }
 leptos_router = { version = "0.8.2" }
@@ -97,3 +105,6 @@ lib-features = []
 #
 # Optional. Defaults to false.
 lib-default-features = false
+
+# Use the size-optimised profile for the wasm bundle in release builds
+lib-profile-release = "wasm-release"
