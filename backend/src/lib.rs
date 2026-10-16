@@ -4,4 +4,6 @@
 pub mod config;
 pub mod lldap;
 pub mod repo;
+pub mod session;
+pub mod throttle;
 pub mod validation;
