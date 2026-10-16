@@ -4,6 +4,39 @@ use std::{fs::File, io::BufReader, sync::Arc};
 
 use crate::config::LldapConfig;
 
+/// LDAP result code for a failed bind with wrong credentials.
+const LDAP_INVALID_CREDENTIALS: u32 = 49;
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LldapUser {
+    pub id: String,
+    pub email: String,
+    pub display_name: String,
+    pub first_name: String,
+    pub last_name: String,
+    pub creation_date: String,
+    pub groups: Vec<LldapGroup>,
+}
+
+impl LldapUser {
+    pub fn is_member_of(&self, group: &str) -> bool {
+        self.groups.iter().any(|g| g.display_name == group)
+    }
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LldapGroup {
+    pub id: i32,
+    pub display_name: String,
+}
+
+#[derive(Deserialize)]
+struct GetUserResponse {
+    user: LldapUser,
+}
+
 #[derive(Clone, Debug)]
 pub struct LldapClient {
     pub config: LldapConfig,
@@ -136,6 +169,74 @@ impl LldapClient {
 
     pub async fn email_exists(&self, email: &str) -> Result<bool, LldapError> {
         self.user_exists("email", email).await
+    }
+
+    /// Checks a user's password with an LDAP simple bind. Returns `Ok(false)`
+    /// for wrong credentials and `Err` only when LLDAP itself is unreachable.
+    pub async fn verify_credentials(
+        &self,
+        username: &str,
+        password: &str,
+    ) -> Result<bool, LldapError> {
+        // An empty password would turn the bind into an anonymous bind, and an
+        // unvalidated username could inject extra DN components.
+        if password.is_empty() || crate::validation::validate_username(username).is_err() {
+            return Ok(false);
+        }
+
+        let settings = self.ldap_settings()?;
+        let (connection, mut ldap) =
+            ldap3::LdapConnAsync::with_settings(settings, &self.ldap_transport_url()).await?;
+        ldap3::drive!(connection);
+
+        let user_dn = format!("uid={},ou=people,{}", username, self.config.base_dn);
+        let result = ldap.simple_bind(&user_dn, password).await?;
+        let _ = ldap.unbind().await;
+
+        match result.rc {
+            0 => Ok(true),
+            LDAP_INVALID_CREDENTIALS => Ok(false),
+            _ => Err(LldapError::from(result.success().unwrap_err())),
+        }
+    }
+
+    /// Fetches the live profile and group memberships for a user.
+    pub async fn get_user(&self, username: &str) -> Result<Option<LldapUser>, LldapError> {
+        let token = self
+            .login(&self.config.username, &self.config.password)
+            .await?;
+        let query = r#"
+            query GetUser($id: String!) {
+                user(userId: $id) {
+                    id email displayName firstName lastName creationDate
+                    groups { id displayName }
+                }
+            }
+        "#;
+        match self
+            .graphql::<GetUserResponse>(&token, query, serde_json::json!({ "id": username }))
+            .await
+        {
+            Ok(response) => Ok(Some(response.user)),
+            // LLDAP reports a missing user as a GraphQL error rather than null.
+            Err(LldapError::Graphql(message)) if message.contains("not found") => Ok(None),
+            Err(error) => Err(error),
+        }
+    }
+
+    /// Sets a new password after confirming the current one.
+    /// Returns `Ok(false)` if the current password is wrong.
+    pub async fn change_password(
+        &self,
+        username: &str,
+        current_password: &str,
+        new_password: &str,
+    ) -> Result<bool, LldapError> {
+        if !self.verify_credentials(username, current_password).await? {
+            return Ok(false);
+        }
+        self.set_password(username, new_password).await?;
+        Ok(true)
     }
 
     pub async fn login(&self, username: &str, password: &str) -> Result<String, LldapError> {
