@@ -13,10 +13,26 @@ leptos_axum = { workspace = true, optional = true }
 
 http.workspace = true
 cfg-if.workspace = true
+log.workspace = true
+serde.workspace = true
 thiserror.workspace = true
+
+# Server-only: never compiled into the wasm bundle.
+axum = { workspace = true, optional = true }
+backend = { workspace = true, optional = true }
+serde_json = { version = "1.0", optional = true }
+tower-sessions = { workspace = true, optional = true }
 
 [features]
 default = []
 hydrate = ["leptos/hydrate"]
-ssr = ["leptos/ssr", "leptos_meta/ssr", "leptos_router/ssr", "dep:leptos_axum"]
-
+ssr = [
+    "leptos/ssr",
+    "leptos_meta/ssr",
+    "leptos_router/ssr",
+    "dep:leptos_axum",
+    "dep:axum",
+    "dep:backend",
+    "dep:serde_json",
+    "dep:tower-sessions",
+]

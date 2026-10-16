@@ -2,8 +2,15 @@ use leptos::prelude::*;
 use leptos_meta::{provide_meta_context, MetaTags, Stylesheet, Title};
 use leptos_router::{
     components::{Route, Router, Routes},
-    StaticSegment,
+    SsrMode, StaticSegment,
 };
+
+pub mod auth;
+mod pages;
+#[cfg(feature = "ssr")]
+pub mod server;
+
+use pages::{account::AccountPage, login::LoginPage};
 
 pub fn shell(options: LeptosOptions) -> impl IntoView {
     view! {
@@ -30,30 +37,17 @@ pub fn App() -> impl IntoView {
 
     view! {
         <Stylesheet id="leptos" href="/pkg/account-manager.css"/>
+        <Title text="Account"/>
 
-        // sets the document title
-        <Title text="Welcome to Leptos"/>
-
-        // content for this welcome page
         <Router>
             <main>
+                // Protected pages render with SsrMode::Async so a logged-out
+                // visitor gets a real HTTP redirect before any HTML is sent.
                 <Routes fallback=|| "Page not found.".into_view()>
-                    <Route path=StaticSegment("") view=HomePage/>
+                    <Route path=StaticSegment("") view=AccountPage ssr=SsrMode::Async/>
+                    <Route path=StaticSegment("login") view=LoginPage/>
                 </Routes>
             </main>
         </Router>
-    }
-}
-
-/// Renders the home page of your application.
-#[component]
-fn HomePage() -> impl IntoView {
-    // Creates a reactive value to update the button
-    let count = RwSignal::new(0);
-    let on_click = move |_| *count.write() += 1;
-
-    view! {
-        <h1>"Welcome to Leptos!"</h1>
-        <button on:click=on_click>"Click Me: " {count}</button>
     }
 }
