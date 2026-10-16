@@ -2,4 +2,5 @@
 //! persistence, and the LLDAP client. Never compiled into the wasm bundle.
 
 pub mod config;
+pub mod lldap;
 pub mod validation;
