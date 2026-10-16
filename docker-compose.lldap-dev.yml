@@ -1,0 +1,51 @@
+services:
+  lldap:
+    image: lldap/lldap:stable
+    container_name: account-manager-lldap
+    ports:
+      - "127.0.0.1:17170:17170"
+      - "127.0.0.1:3890:3890"
+    environment:
+      UID: "1000"
+      GID: "1000"
+      TZ: "UTC"
+      LLDAP_JWT_SECRET: "dev-only-jwt-secret-change-me"
+      LLDAP_KEY_SEED: "dev-only-key-seed-change-me"
+      LLDAP_LDAP_BASE_DN: "dc=example,dc=com"
+      LLDAP_LDAP_USER_DN: "admin"
+      LLDAP_LDAP_USER_EMAIL: "admin@example.com"
+      LLDAP_LDAP_USER_PASS: "dev-only-password-change-me"
+      LLDAP_HTTP_URL: "http://127.0.0.1:17170"
+      LLDAP_HTTP_PORT: "17170"
+      LLDAP_LDAP_PORT: "3890"
+    volumes:
+      - lldap-data:/data
+    healthcheck:
+      test: ["CMD", "/app/lldap", "healthcheck", "--config-file", "/data/lldap_config.toml"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  lldap-bootstrap:
+    image: lldap/lldap:stable
+    container_name: account-manager-lldap-bootstrap
+    depends_on:
+      lldap:
+        condition: service_healthy
+    entrypoint: ["/app/bootstrap.sh"]
+    environment:
+      LLDAP_URL: "http://lldap:17170"
+      LLDAP_ADMIN_USERNAME: "admin"
+      LLDAP_ADMIN_PASSWORD: "dev-only-password-change-me"
+      USER_CONFIGS_DIR: "/bootstrap/user-configs"
+      GROUP_CONFIGS_DIR: "/bootstrap/group-configs"
+      USER_SCHEMAS_DIR: "/bootstrap/user-schemas"
+      GROUP_SCHEMAS_DIR: "/bootstrap/group-schemas"
+      DO_CLEANUP: "false"
+    volumes:
+      - ./lldap-bootstrap:/bootstrap:ro
+    restart: "no"
+
+volumes:
+  lldap-data:
