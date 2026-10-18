@@ -2,6 +2,7 @@ import { test, expect } from "@playwright/test";
 import {
   failOnConsoleErrors,
   gotoHydrated,
+  jellyfinLogin,
   login,
   signUpNewUser,
   submitLogin,
@@ -62,6 +63,12 @@ test("changing the password signs out other sessions but keeps this one", async 
   await otherDevice.close();
 
   await waitForEmail(user.email, "Your password was changed");
+
+  // Jellyfin checks the password against LLDAP, so it changed there too.
+  // (Polls because Jellyfin sign-in needs the "jelly" group, which the
+  // background sync adds.)
+  await expect.poll(() => jellyfinLogin(user.username, newPassword), { timeout: 30_000 }).toBe(200);
+  expect(await jellyfinLogin(user.username, user.password)).toBe(401);
 });
 
 test("changing the email needs the link sent to the new address", async ({ page, browser }) => {
