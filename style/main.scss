@@ -7,6 +7,7 @@
 	--accent: #3b5bdb;
 	--accent-text: #ffffff;
 	--error: #c92a2a;
+	--success: #2b8a3e;
 	color-scheme: light;
 }
 
@@ -20,6 +21,7 @@
 		--accent: #748ffc;
 		--accent-text: #0f1114;
 		--error: #ff8787;
+		--success: #69db7c;
 		color-scheme: dark;
 	}
 }
@@ -166,6 +168,15 @@ button {
 	}
 }
 
+small {
+	font-weight: 400;
+}
+
+.form-success {
+	margin: 0;
+	color: var(--success);
+}
+
 .nav {
 	display: flex;
 	flex-wrap: wrap;
@@ -197,4 +208,10 @@ button {
 
 a {
 	color: var(--accent);
+}
+
+// Field hints sit after their label (linked with aria-describedby) so they
+// don't become part of the field's accessible name.
+.hint {
+	margin-top: -0.6rem;
 }

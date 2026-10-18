@@ -4,12 +4,15 @@ use std::net::SocketAddr;
 
 use axum::extract::ConnectInfo;
 use backend::{
+    accounts::AccountError,
     session::{SessionUser, SESSION_USER_KEY},
     AppState,
 };
 use http::request::Parts;
 use leptos::prelude::*;
 use tower_sessions::Session;
+
+pub const NOT_LOGGED_IN: &str = "Your session has ended. Please log in again.";
 
 /// Everything a server function needs from the request.
 ///
@@ -104,6 +107,12 @@ impl Ctx {
         }
     }
 
+    pub async fn require_user(&self) -> Result<SessionUser, ServerFnError> {
+        self.user()
+            .await?
+            .ok_or_else(|| ServerFnError::new(NOT_LOGGED_IN))
+    }
+
     /// Stores a freshly authenticated user under a new session id (so a
     /// planted id can't be reused).
     pub async fn start_session(&self, user: SessionUser) -> Result<(), ServerFnError> {
@@ -136,4 +145,12 @@ pub fn now_unix() -> i64 {
 pub fn internal(detail: impl std::fmt::Display) -> ServerFnError {
     log::error!("{detail}");
     ServerFnError::new("Something went wrong. Please try again.")
+}
+
+/// Shows rejections as-is and hides internal failures behind `internal`.
+pub fn account_error(error: AccountError) -> ServerFnError {
+    match error {
+        AccountError::Rejected(message) => ServerFnError::new(message),
+        AccountError::Internal(detail) => internal(detail),
+    }
 }
