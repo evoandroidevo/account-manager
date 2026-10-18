@@ -1,4 +1,5 @@
 pub mod audit;
+pub mod email_changes;
 pub mod invites;
 pub mod users;
 

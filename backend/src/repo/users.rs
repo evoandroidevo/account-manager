@@ -14,7 +14,12 @@ pub struct UserRecord {
     pub created_at: String,
     pub last_login_at: Option<String>,
     pub disabled_at: Option<String>,
+    /// Unix seconds; sessions authenticated before this are invalid.
+    pub password_changed_at: Option<i64>,
 }
+
+const USER_COLUMNS: &str =
+    "id, username, created_at, last_login_at, disabled_at, password_changed_at";
 
 impl UserRepository {
     pub fn new(pool: SqlitePool) -> Self {
@@ -41,13 +46,28 @@ impl UserRepository {
     }
 
     pub async fn find_by_username(&self, username: &str) -> Result<Option<UserRecord>, sqlx::Error> {
-        sqlx::query_as::<_, UserRecord>(
-            "SELECT id, username, created_at, last_login_at, disabled_at
-             FROM users WHERE username = ?",
-        )
+        sqlx::query_as::<_, UserRecord>(&format!(
+            "SELECT {USER_COLUMNS} FROM users WHERE username = ?"
+        ))
         .bind(username)
         .fetch_optional(&self.pool)
         .await
+    }
+
+    pub async fn find_by_id(&self, id: &str) -> Result<Option<UserRecord>, sqlx::Error> {
+        sqlx::query_as::<_, UserRecord>(&format!("SELECT {USER_COLUMNS} FROM users WHERE id = ?"))
+            .bind(id)
+            .fetch_optional(&self.pool)
+            .await
+    }
+
+    pub async fn set_password_changed_at(&self, id: &str, unix: i64) -> Result<(), sqlx::Error> {
+        sqlx::query("UPDATE users SET password_changed_at = ? WHERE id = ?")
+            .bind(unix)
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
     }
 
     pub async fn touch_login(&self, id: &str) -> Result<(), sqlx::Error> {

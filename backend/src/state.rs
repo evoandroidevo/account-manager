@@ -9,7 +9,10 @@ use crate::{
     config::AppConfig,
     lldap::LldapClient,
     mailer::Mailer,
-    repo::{self, audit::AuditLog, invites::InviteRepository, users::UserRepository},
+    repo::{
+        self, audit::AuditLog, email_changes::EmailChangeRepository, invites::InviteRepository,
+        users::UserRepository,
+    },
     throttle::LoginThrottle,
 };
 
@@ -19,6 +22,7 @@ pub struct AppState {
     pub pool: SqlitePool,
     pub invites: InviteRepository,
     pub users: UserRepository,
+    pub email_changes: EmailChangeRepository,
     pub audit: AuditLog,
     pub lldap: LldapClient,
     pub mailer: Mailer,
@@ -49,6 +53,7 @@ impl AppState {
         Ok(Self {
             invites: InviteRepository::new(pool.clone()),
             users: UserRepository::new(pool.clone()),
+            email_changes: EmailChangeRepository::new(pool.clone()),
             audit: AuditLog::new(pool.clone()),
             lldap: LldapClient::new(config.ldap.clone()),
             mailer: Mailer::new(&config.mail)?,
