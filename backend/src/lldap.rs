@@ -53,7 +53,16 @@ pub enum LldapError {
 impl std::fmt::Display for LldapError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Http(error) => write!(f, "{error}"),
+            Self::Http(error) => {
+                // reqwest's top-level message hides the cause (e.g. a reset connection).
+                write!(f, "{error}")?;
+                let mut source = std::error::Error::source(error);
+                while let Some(cause) = source {
+                    write!(f, ": {cause}")?;
+                    source = cause.source();
+                }
+                Ok(())
+            }
             Self::Json(error) => write!(f, "{error}"),
             Self::Graphql(message) => f.write_str(message),
         }
@@ -84,7 +93,14 @@ impl LldapClient {
     pub fn new(config: LldapConfig) -> Self {
         Self {
             config,
-            http: reqwest::Client::new(),
+            http: reqwest::Client::builder()
+                // LLDAP (actix-web) closes idle keep-alive connections after
+                // ~5s; reqwest would keep them for 90s and occasionally send a
+                // request down one that is being closed. Expire ours first.
+                .pool_idle_timeout(std::time::Duration::from_secs(3))
+                .timeout(std::time::Duration::from_secs(15))
+                .build()
+                .expect("static reqwest configuration is valid"),
         }
     }
 
