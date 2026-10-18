@@ -26,6 +26,8 @@ ldap:
 
 invites:
   expiration_hours: 48
+  # Groups pre-selected on the admin invite form
+  default_groups: [user, jelly]
 
 session:
   cookie_name: am_session
@@ -39,6 +41,19 @@ auth:
   admin_group: admins
   login_max_attempts: 5
   login_window_minutes: 15
+
+mail:
+  # smtp | file (writes .eml files to outbox_dir; dev/tests) | log (only logs)
+  transport: smtp
+  from: "Account Manager <no-reply@dyslexicevo.dev>"
+  smtp:
+    host: mail.smtp2go.com
+    port: 587
+    starttls: true   # false = implicit TLS (usually port 465)
+    username: change-me
+    password: change-me  # prefer APP__MAIL__SMTP__PASSWORD
+  outbox_dir: ./data/outbox
+  email_change_link_hours: 24
 
 password_policy:
   minimum_length: 12

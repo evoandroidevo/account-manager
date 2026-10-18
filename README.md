@@ -8,7 +8,7 @@ LLDAP is the identity source of truth; this app never stores passwords.
 
 | Crate      | Role                                                                     |
 |------------|--------------------------------------------------------------------------|
-| `backend`  | Server-only: config, SQLite repos + migrations, LLDAP client, throttling |
+| `backend`  | Server-only: config, SQLite repos + migrations, LLDAP client, mailer, account workflows (`accounts.rs`) |
 | `app`      | Leptos pages and `#[server]` functions (`ssr` pulls in `backend`)         |
 | `frontend` | wasm hydrate entry point                                                 |
 | `server`   | axum binary: sessions, CSRF origin guard, `/health`, background tasks    |
@@ -17,6 +17,18 @@ LLDAP is the identity source of truth; this app never stores passwords.
 
 Copy `config.example.yaml` to `config.yaml` (or set `APP_CONFIG=/path/to/file.yaml`).
 Every key can be overridden as `APP__SECTION__KEY`, e.g. `APP__LDAP__PASSWORD`.
+
+## Pages
+
+| Route | Who | |
+|---|---|---|
+| `/login` | anyone | LLDAP username and password |
+| `/invite?code=…` | anyone with an invite | create an account; logs straight in |
+| `/` | user | profile and groups |
+| `/security` | user | change password (signs out other devices) |
+| `/email` | user | change email via a link sent to the new address |
+| `/confirm-email?token=…` | link holder | confirm an email change |
+| `/admin/invites` | `auth.admin_group` | create, list and revoke invite links |
 
 ## Development
 
@@ -36,9 +48,11 @@ server:   { public_url: http://127.0.0.1:3000, trust_proxy_headers: false }
 ldap:     { http_url: http://127.0.0.1:17170, ldap_url: ldap://127.0.0.1:3890,
             base_dn: dc=example,dc=com, username: admin, password: dev-only-password-change-me }
 session:  { secure_cookie: false }
+mail:     { transport: file, outbox_dir: ./data/outbox }   # emails land here as .eml files
 ```
 
-Seed users are listed in [lldap-bootstrap/README.md](lldap-bootstrap/README.md).
+Seed users are listed in [lldap-bootstrap/README.md](lldap-bootstrap/README.md); `bob`
+is an admin and can create invite links at `/admin/invites`.
 Open the app at exactly the `public_url` origin (`127.0.0.1`, not `localhost`), or
 form posts are refused by the CSRF origin check.
 
@@ -54,5 +68,8 @@ cd end2end && npm ci && npx playwright install chromium   # first time only
 npx playwright test
 ```
 
-The Playwright config starts `target/debug/server` itself on port 3000, so stop
-any running dev server first.
+The Playwright config starts `target/debug/server` itself on port 3000 (stop any
+running dev server first). It ignores `config.yaml`, uses its own database
+(`data/e2e.db`) and reads emails from `data/e2e-outbox/`. Tests that change a
+password or email sign up fresh accounts, so the seed users never change; each run
+does add a few `e2e…` users to the dev LLDAP.

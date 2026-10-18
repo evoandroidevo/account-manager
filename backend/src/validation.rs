@@ -22,6 +22,29 @@ impl Default for PasswordPolicy {
     }
 }
 
+/// The policy as a sentence, e.g. for a hint under a password field.
+pub fn describe_password_policy(policy: &PasswordPolicy) -> String {
+    let mut parts = Vec::new();
+    if policy.require_uppercase {
+        parts.push("an uppercase letter");
+    }
+    if policy.require_lowercase {
+        parts.push("a lowercase letter");
+    }
+    if policy.require_number {
+        parts.push("a number");
+    }
+    if policy.require_special {
+        parts.push("a symbol");
+    }
+    let base = format!("At least {} characters", policy.minimum_length);
+    match parts.as_slice() {
+        [] => format!("{base}."),
+        [only] => format!("{base}, with {only}."),
+        [rest @ .., last] => format!("{base}, with {} and {last}.", rest.join(", ")),
+    }
+}
+
 /// User-safe: at least 3 characters, starting with a letter, using only
 /// letters, numbers, periods, hyphens, and underscores.
 pub fn validate_username(username: &str) -> Result<(), String> {
@@ -99,7 +122,10 @@ pub fn validate_password(password: &str, policy: &PasswordPolicy) -> Result<(), 
 
 #[cfg(test)]
 mod tests {
-    use super::{PasswordPolicy, validate_email, validate_password, validate_username};
+    use super::{
+        PasswordPolicy, describe_password_policy, validate_email, validate_password,
+        validate_username,
+    };
 
     #[test]
     fn accepts_a_well_formed_username() {
@@ -169,5 +195,21 @@ mod tests {
             require_special: false,
         };
         assert!(validate_password("pass", &policy).is_ok());
+    }
+
+    #[test]
+    fn describes_the_password_policy_in_words() {
+        assert_eq!(
+            describe_password_policy(&PasswordPolicy::default()),
+            "At least 12 characters, with an uppercase letter, a lowercase letter, a number and a symbol."
+        );
+        let relaxed = PasswordPolicy {
+            minimum_length: 8,
+            require_uppercase: false,
+            require_lowercase: false,
+            require_number: true,
+            require_special: false,
+        };
+        assert_eq!(describe_password_policy(&relaxed), "At least 8 characters, with a number.");
     }
 }

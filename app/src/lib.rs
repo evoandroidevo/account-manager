@@ -1,16 +1,22 @@
 use leptos::prelude::*;
 use leptos_meta::{provide_meta_context, MetaTags, Stylesheet, Title};
 use leptos_router::{
-    components::{Route, Router, Routes},
+    components::{ParentRoute, Route, Router, Routes},
     SsrMode, StaticSegment,
 };
 
+pub mod account;
 pub mod auth;
+pub mod invites;
 mod pages;
 #[cfg(feature = "ssr")]
 pub mod server;
 
-use pages::{account::AccountPage, login::LoginPage};
+use pages::{
+    account::AccountPage, admin_invites::AdminInvitesPage, confirm_email::ConfirmEmailPage,
+    email::EmailPage, invite::InvitePage, layout::ProtectedLayout, login::LoginPage,
+    security::SecurityPage,
+};
 
 pub fn shell(options: LeptosOptions) -> impl IntoView {
     view! {
@@ -41,11 +47,24 @@ pub fn App() -> impl IntoView {
 
         <Router>
             <main>
-                // Protected pages render with SsrMode::Async so a logged-out
-                // visitor gets a real HTTP redirect before any HTML is sent.
                 <Routes fallback=|| "Page not found.".into_view()>
-                    <Route path=StaticSegment("") view=AccountPage ssr=SsrMode::Async/>
+                    // Public pages.
                     <Route path=StaticSegment("login") view=LoginPage/>
+                    <Route path=StaticSegment("invite") view=InvitePage/>
+                    <Route path=StaticSegment("confirm-email") view=ConfirmEmailPage/>
+
+                    // Pages behind a login. SsrMode::Async waits for the session
+                    // check, so logged-out visitors get a real HTTP redirect.
+                    <ParentRoute path=StaticSegment("") view=ProtectedLayout ssr=SsrMode::Async>
+                        <Route path=StaticSegment("") view=AccountPage ssr=SsrMode::Async/>
+                        <Route path=StaticSegment("security") view=SecurityPage ssr=SsrMode::Async/>
+                        <Route path=StaticSegment("email") view=EmailPage ssr=SsrMode::Async/>
+                        <Route
+                            path=(StaticSegment("admin"), StaticSegment("invites"))
+                            view=AdminInvitesPage
+                            ssr=SsrMode::Async
+                        />
+                    </ParentRoute>
                 </Routes>
             </main>
         </Router>

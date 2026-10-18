@@ -2,7 +2,7 @@ use leptos::prelude::*;
 use leptos_meta::Title;
 use leptos_router::components::Redirect;
 
-use crate::auth::{account_overview, error_text, AccountProfile, Logout};
+use crate::auth::{account_overview, error_text, AccountProfile};
 
 #[component]
 pub fn AccountPage() -> impl IntoView {
@@ -17,7 +17,7 @@ pub fn AccountPage() -> impl IntoView {
                     Ok(None) => view! { <Redirect path="/login"/> }.into_any(),
                     Err(error) => {
                         view! {
-                            <section class="card narrow">
+                            <section class="card">
                                 <h1>"Account unavailable"</h1>
                                 <p class="form-error">{error_text(&error)}</p>
                             </section>
@@ -32,22 +32,9 @@ pub fn AccountPage() -> impl IntoView {
 
 #[component]
 fn AccountView(account: AccountProfile) -> impl IntoView {
-    let logout = ServerAction::<Logout>::new();
-    let AccountProfile { username, display_name, email, member_since, groups, is_admin } =
-        account;
+    let AccountProfile { username, display_name, email, member_since, .. } = account;
 
     view! {
-        <header class="topbar">
-            <span class="brand">"Account"</span>
-            <span class="who">
-                {username.clone()}
-                {is_admin.then(|| view! { <span class="badge">"admin"</span> })}
-            </span>
-            <ActionForm action=logout>
-                <button type="submit" class="link">"Log out"</button>
-            </ActionForm>
-        </header>
-
         <section class="card">
             <h1>{display_name}</h1>
             <dl class="details">
@@ -57,12 +44,6 @@ fn AccountView(account: AccountProfile) -> impl IntoView {
                 <dd>{email}</dd>
                 <dt>"Member since"</dt>
                 <dd>{member_since}</dd>
-                <dt>"Groups"</dt>
-                <dd>
-                    <ul class="chips">
-                        {groups.into_iter().map(|group| view! { <li>{group}</li> }).collect_view()}
-                    </ul>
-                </dd>
             </dl>
         </section>
     }
