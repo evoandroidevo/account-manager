@@ -118,12 +118,15 @@ impl Default for LldapConfig {
 #[serde(default)]
 pub struct InviteConfig {
     pub expiration_hours: i64,
+    /// Groups pre-selected when an admin creates an invite.
+    pub default_groups: Vec<String>,
 }
 
 impl Default for InviteConfig {
     fn default() -> Self {
         Self {
             expiration_hours: 48,
+            default_groups: vec!["user".to_owned()],
         }
     }
 }
@@ -294,7 +297,7 @@ mod tests {
 
         let path = temp_config(
             "account-manager-config",
-            "server:\n  public_url: https://account.example.com\n  trust_proxy_headers: true\ninvites:\n  expiration_hours: 12\nsession:\n  secure_cookie: false\nmail:\n  transport: smtp\n  smtp:\n    host: mail.example.com\npassword_policy:\n  minimum_length: 16\n",
+            "server:\n  public_url: https://account.example.com\n  trust_proxy_headers: true\ninvites:\n  expiration_hours: 12\n  default_groups: [user, jelly]\nsession:\n  secure_cookie: false\nmail:\n  transport: smtp\n  smtp:\n    host: mail.example.com\npassword_policy:\n  minimum_length: 16\n",
         );
 
         let config = AppConfig::load(&path).expect("test config should parse");
@@ -302,6 +305,7 @@ mod tests {
         assert_eq!(config.server.public_url, "https://account.example.com");
         assert!(config.server.trust_proxy_headers);
         assert_eq!(config.invites.expiration_hours, 12);
+        assert_eq!(config.invites.default_groups, ["user", "jelly"]);
         assert!(!config.session.secure_cookie);
         assert_eq!(config.mail.transport, super::MailTransport::Smtp);
         assert_eq!(config.mail.smtp.host, "mail.example.com");

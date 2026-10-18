@@ -1,6 +1,7 @@
 //! Server-only building blocks for the account manager: configuration,
 //! persistence, and the LLDAP client. Never compiled into the wasm bundle.
 
+pub mod accounts;
 pub mod config;
 pub mod lldap;
 pub mod mailer;
