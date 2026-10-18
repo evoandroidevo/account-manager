@@ -71,6 +71,16 @@ impl AppConfig {
             if !seen.insert(tier.id.as_str()) {
                 return Err(format!("tier id \"{}\" is used twice", tier.id));
             }
+            if let Some(seerr) = &tier.seerr {
+                for name in &seerr.permissions {
+                    if crate::services::seerr::permission_bit(name).is_none() {
+                        return Err(format!(
+                            "tier \"{}\": unknown Seerr permission \"{name}\"",
+                            tier.id
+                        ));
+                    }
+                }
+            }
         }
         if self.tier(&self.default_tier).is_none() {
             return Err(format!(
@@ -608,7 +618,7 @@ tiers:
 
     #[test]
     fn validation_catches_bad_tier_and_service_setups() {
-        use super::TierConfig;
+        use super::{SeerrTier, TierConfig};
 
         let tier = |id: &str| TierConfig {
             id: id.to_owned(),
@@ -626,6 +636,9 @@ tiers:
 
         check(AppConfig { tiers: vec![tier("free"), tier("free")], ..AppConfig::default() }, "used twice");
         check(AppConfig { default_tier: "gold".to_owned(), ..AppConfig::default() }, "default_tier");
+        let mut bad_permission = tier("free");
+        bad_permission.seerr = Some(SeerrTier { permissions: vec!["FLY".to_owned()], ..SeerrTier::default() });
+        check(AppConfig { tiers: vec![bad_permission], ..AppConfig::default() }, "FLY");
 
         let mut no_key = AppConfig::default();
         no_key.jellyfin.enabled = true;
