@@ -7,13 +7,15 @@ use leptos_router::{
 
 pub mod account;
 pub mod auth;
+pub mod invites;
 mod pages;
 #[cfg(feature = "ssr")]
 pub mod server;
 
 use pages::{
-    account::AccountPage, confirm_email::ConfirmEmailPage, email::EmailPage,
-    layout::ProtectedLayout, login::LoginPage, security::SecurityPage,
+    account::AccountPage, admin_invites::AdminInvitesPage, confirm_email::ConfirmEmailPage,
+    email::EmailPage, invite::InvitePage, layout::ProtectedLayout, login::LoginPage,
+    security::SecurityPage,
 };
 
 pub fn shell(options: LeptosOptions) -> impl IntoView {
@@ -48,6 +50,7 @@ pub fn App() -> impl IntoView {
                 <Routes fallback=|| "Page not found.".into_view()>
                     // Public pages.
                     <Route path=StaticSegment("login") view=LoginPage/>
+                    <Route path=StaticSegment("invite") view=InvitePage/>
                     <Route path=StaticSegment("confirm-email") view=ConfirmEmailPage/>
 
                     // Pages behind a login. SsrMode::Async waits for the session
@@ -56,6 +59,11 @@ pub fn App() -> impl IntoView {
                         <Route path=StaticSegment("") view=AccountPage ssr=SsrMode::Async/>
                         <Route path=StaticSegment("security") view=SecurityPage ssr=SsrMode::Async/>
                         <Route path=StaticSegment("email") view=EmailPage ssr=SsrMode::Async/>
+                        <Route
+                            path=(StaticSegment("admin"), StaticSegment("invites"))
+                            view=AdminInvitesPage
+                            ssr=SsrMode::Async
+                        />
                     </ParentRoute>
                 </Routes>
             </main>

@@ -1,6 +1,8 @@
 pub mod account;
+pub mod admin_invites;
 pub mod confirm_email;
 pub mod email;
+pub mod invite;
 pub mod layout;
 pub mod login;
 pub mod security;

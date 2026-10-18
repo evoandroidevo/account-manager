@@ -113,6 +113,26 @@ impl Ctx {
             .ok_or_else(|| ServerFnError::new(NOT_LOGGED_IN))
     }
 
+    /// Like `require_user`, but also re-checks admin group membership in
+    /// LLDAP, so removing someone from the group takes effect immediately.
+    pub async fn require_admin(&self) -> Result<SessionUser, ServerFnError> {
+        let user = self.require_user().await?;
+        let is_admin = self
+            .state
+            .lldap
+            .get_user(&user.username)
+            .await
+            .map_err(|error| {
+                internal(format!("LLDAP lookup for {} failed: {error}", user.username))
+            })?
+            .is_some_and(|profile| profile.is_member_of(&self.state.config.auth.admin_group));
+        if is_admin {
+            Ok(user)
+        } else {
+            Err(ServerFnError::new("Only administrators can do that."))
+        }
+    }
+
     /// Stores a freshly authenticated user under a new session id (so a
     /// planted id can't be reused).
     pub async fn start_session(&self, user: SessionUser) -> Result<(), ServerFnError> {

@@ -109,10 +109,15 @@ pub async fn login(username: String, password: String) -> Result<(), ServerFnErr
     Ok(())
 }
 
+/// Ends the session and goes to `next` (a local path) or the login page.
 #[server]
-pub async fn logout() -> Result<(), ServerFnError> {
+pub async fn logout(next: Option<String>) -> Result<(), ServerFnError> {
     ctx()?.end_session().await?;
-    leptos_axum::redirect("/login");
+    // Only same-site paths, so this can't be used as an open redirect.
+    let target = next
+        .filter(|path| path.starts_with('/') && !path.starts_with("//") && !path.contains('\\'))
+        .unwrap_or_else(|| "/login".to_owned());
+    leptos_axum::redirect(&target);
     Ok(())
 }
 
