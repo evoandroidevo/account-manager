@@ -2,7 +2,24 @@ use leptos::prelude::*;
 use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "ssr")]
-use crate::server::{app_state, client_ip, internal, now_unix, session, session_user};
+use crate::server::{ctx, internal, now_unix};
+
+/// Who is logged in, for the page chrome.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct CurrentUser {
+    pub username: String,
+    pub is_admin: bool,
+}
+
+/// `Ok(None)` when nobody is logged in.
+#[server]
+pub async fn whoami() -> Result<Option<CurrentUser>, ServerFnError> {
+    let ctx = ctx()?;
+    Ok(ctx.user().await?.map(|user| CurrentUser {
+        username: user.username,
+        is_admin: user.is_admin,
+    }))
+}
 
 /// The profile shown on the account page, read live from LLDAP.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -17,12 +34,13 @@ pub struct AccountProfile {
 
 #[server]
 pub async fn login(username: String, password: String) -> Result<(), ServerFnError> {
-    use backend::session::{SessionUser, SESSION_USER_KEY};
+    use backend::session::SessionUser;
 
-    let state = app_state()?;
+    let ctx = ctx()?;
+    let state = &ctx.state;
     // LLDAP user ids are case-insensitive and stored lowercase.
     let username = username.trim().to_ascii_lowercase();
-    let ip = client_ip().await;
+    let ip = ctx.client_ip.clone();
 
     let mut keys = vec![format!("user:{username}")];
     if let Some(ip) = &ip {
@@ -75,24 +93,13 @@ pub async fn login(username: String, password: String) -> Result<(), ServerFnErr
         log::warn!("failed to record login time for {username}: {error}");
     }
 
-    let session = session().await?;
-    // New session id on privilege change, so a planted id can't be reused.
-    session
-        .cycle_id()
-        .await
-        .map_err(|error| internal(format!("session cycle failed: {error}")))?;
-    session
-        .insert(
-            SESSION_USER_KEY,
-            SessionUser {
-                user_id: user.id.clone(),
-                username: profile.id.clone(),
-                is_admin: profile.is_member_of(&state.config.auth.admin_group),
-                authenticated_at: now_unix(),
-            },
-        )
-        .await
-        .map_err(|error| internal(format!("session write failed: {error}")))?;
+    ctx.start_session(SessionUser {
+        user_id: user.id.clone(),
+        username: profile.id.clone(),
+        is_admin: profile.is_member_of(&state.config.auth.admin_group),
+        authenticated_at: now_unix(),
+    })
+    .await?;
 
     state
         .audit
@@ -105,11 +112,7 @@ pub async fn login(username: String, password: String) -> Result<(), ServerFnErr
 
 #[server]
 pub async fn logout() -> Result<(), ServerFnError> {
-    let session = session().await?;
-    session
-        .flush()
-        .await
-        .map_err(|error| internal(format!("session flush failed: {error}")))?;
+    ctx()?.end_session().await?;
     leptos_axum::redirect("/login");
     Ok(())
 }
@@ -117,24 +120,25 @@ pub async fn logout() -> Result<(), ServerFnError> {
 /// `Ok(None)` means "not logged in"; errors mean the directory couldn't be read.
 #[server]
 pub async fn account_overview() -> Result<Option<AccountProfile>, ServerFnError> {
-    let Some(user) = session_user().await? else {
+    let ctx = ctx()?;
+    let Some(user) = ctx.user().await? else {
         return Ok(None);
     };
-    let state = app_state()?;
 
-    let Some(profile) = state
+    let Some(profile) = ctx
+        .state
         .lldap
         .get_user(&user.username)
         .await
         .map_err(|error| internal(format!("LLDAP lookup for {} failed: {error}", user.username)))?
     else {
         // Deleted from LLDAP while logged in: end the session.
-        let _ = session().await?.flush().await;
+        ctx.end_session().await?;
         return Ok(None);
     };
 
     Ok(Some(AccountProfile {
-        is_admin: profile.is_member_of(&state.config.auth.admin_group),
+        is_admin: profile.is_member_of(&ctx.state.config.auth.admin_group),
         username: profile.id,
         display_name: profile.display_name,
         email: profile.email,
