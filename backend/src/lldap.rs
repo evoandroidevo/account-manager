@@ -275,6 +275,51 @@ impl LldapClient {
         Ok(())
     }
 
+    /// Adds the user to the `add` groups and removes them from the `remove`
+    /// groups, by display name. Unknown group names are an error.
+    pub async fn update_groups(
+        &self,
+        username: &str,
+        add: &[String],
+        remove: &[String],
+    ) -> Result<(), LldapError> {
+        if add.is_empty() && remove.is_empty() {
+            return Ok(());
+        }
+        let token = self
+            .login(&self.config.username, &self.config.password)
+            .await?;
+        let groups = self.list_groups(&token).await?;
+        let group_id = |name: &String| {
+            groups
+                .iter()
+                .find(|group| group.display_name == *name)
+                .map(|group| group.id)
+                .ok_or_else(|| LldapError::Graphql(format!("Unknown group '{name}'")))
+        };
+
+        for name in add {
+            self.add_user_to_group(&token, username, group_id(name)?)
+                .await?;
+        }
+        let query = r#"
+            mutation RemoveUserFromGroup($user: String!, $group: Int!) {
+                removeUserFromGroup(userId: $user, groupId: $group) { ok }
+            }
+        "#;
+        for name in remove {
+            let response: RemoveUserFromGroupResponse = self
+                .graphql(
+                    &token,
+                    query,
+                    serde_json::json!({ "user": username, "group": group_id(name)? }),
+                )
+                .await?;
+            let _ = response.remove_user_from_group.ok;
+        }
+        Ok(())
+    }
+
     /// Display names of every group in the directory, sorted.
     pub async fn group_names(&self) -> Result<Vec<String>, LldapError> {
         let token = self
@@ -576,6 +621,12 @@ struct DeleteUserResponse {
 struct UpdateUserResponse {
     #[serde(rename = "updateUser")]
     update_user: SuccessValue,
+}
+
+#[derive(Deserialize)]
+struct RemoveUserFromGroupResponse {
+    #[serde(rename = "removeUserFromGroup")]
+    remove_user_from_group: SuccessValue,
 }
 
 #[derive(Deserialize)]
