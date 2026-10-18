@@ -46,6 +46,7 @@ async fn main() {
             .continuously_delete_expired(StdDuration::from_secs(60 * 60)),
     );
     spawn_invite_cleanup_task(state.invites.clone());
+    backend::worker::spawn(state.clone());
 
     let session_config = &state.config.session;
     let session_layer = SessionManagerLayer::new(session_store)
