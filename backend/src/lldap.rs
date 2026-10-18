@@ -255,6 +255,41 @@ impl LldapClient {
         Ok(true)
     }
 
+    pub async fn update_email(&self, username: &str, email: &str) -> Result<(), LldapError> {
+        let token = self
+            .login(&self.config.username, &self.config.password)
+            .await?;
+        let query = r#"
+            mutation UpdateUser($user: UpdateUserInput!) {
+                updateUser(user: $user) { ok }
+            }
+        "#;
+        let response: UpdateUserResponse = self
+            .graphql(
+                &token,
+                query,
+                serde_json::json!({ "user": { "id": username, "email": email } }),
+            )
+            .await?;
+        let _ = response.update_user.ok;
+        Ok(())
+    }
+
+    /// Display names of every group in the directory, sorted.
+    pub async fn group_names(&self) -> Result<Vec<String>, LldapError> {
+        let token = self
+            .login(&self.config.username, &self.config.password)
+            .await?;
+        let mut names: Vec<String> = self
+            .list_groups(&token)
+            .await?
+            .into_iter()
+            .map(|group| group.display_name)
+            .collect();
+        names.sort();
+        Ok(names)
+    }
+
     pub async fn login(&self, username: &str, password: &str) -> Result<String, LldapError> {
         let response = self
             .http
@@ -326,7 +361,7 @@ impl LldapClient {
                     "user": {
                         "id": username,
                         "email": email,
-                        "displayName": format!("{first_name} {last_name}"),
+                        "displayName": format!("{first_name} {last_name}").trim(),
                         "firstName": first_name,
                         "lastName": last_name,
                         "avatar": null,
@@ -406,7 +441,8 @@ impl LldapClient {
         Ok(())
     }
 
-    async fn set_password(&self, username: &str, password: &str) -> Result<(), LldapError> {
+    /// Sets a password as the service account, without checking the old one.
+    pub async fn set_password(&self, username: &str, password: &str) -> Result<(), LldapError> {
         let settings = self.ldap_settings()?;
         let (connection, mut ldap) =
             ldap3::LdapConnAsync::with_settings(settings, &self.ldap_transport_url())
@@ -534,6 +570,12 @@ struct CreatedUser {
 struct DeleteUserResponse {
     #[serde(rename = "deleteUser")]
     delete_user: SuccessValue,
+}
+
+#[derive(Deserialize)]
+struct UpdateUserResponse {
+    #[serde(rename = "updateUser")]
+    update_user: SuccessValue,
 }
 
 #[derive(Deserialize)]
