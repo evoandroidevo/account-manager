@@ -318,3 +318,110 @@ button.danger {
 .hint {
 	margin-top: -0.6rem;
 }
+
+h2 {
+	margin: 0 0 0.5rem;
+	font-size: 1.1rem;
+}
+
+.small {
+	font-size: 0.85rem;
+}
+
+.card-header {
+	display: flex;
+	align-items: baseline;
+	justify-content: space-between;
+	gap: 1rem;
+}
+
+.plan-name {
+	margin: 0 0 0.25rem;
+	font-size: 1.25rem;
+	font-weight: 700;
+}
+
+ul.services {
+	display: grid;
+	gap: 0.4rem;
+	margin: 1rem 0 0;
+	padding: 0;
+	list-style: none;
+
+	li {
+		display: flex;
+		justify-content: space-between;
+		gap: 1rem;
+	}
+}
+
+// Sync states shared by the account page and the admin users page.
+.status {
+	&.status-ok {
+		color: var(--success);
+		border-color: var(--success);
+	}
+
+	&.status-error {
+		color: var(--error);
+		border-color: var(--error);
+	}
+
+	&.status-pending,
+	&.status-skipped {
+		color: var(--muted);
+	}
+}
+
+table.users {
+	width: 100%;
+	border-collapse: collapse;
+
+	th,
+	td {
+		padding: 0.5rem 0.6rem;
+		text-align: left;
+		vertical-align: top;
+		border-bottom: 1px solid var(--border);
+	}
+
+	th {
+		color: var(--muted);
+		font-weight: 500;
+	}
+
+	// Flex on a wrapper, not the <td>: a flex cell stops being a table cell
+	// and no longer stretches to the row height, misaligning its border.
+	.badges {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.3rem;
+	}
+
+	tr.editor td {
+		background: var(--bg);
+	}
+}
+
+.editor-form {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+	gap: 0.75rem;
+	align-items: end;
+
+	.editor-actions {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 1rem;
+	}
+}
+
+select {
+	font: inherit;
+	padding: 0.5rem 0.6rem;
+	border: 1px solid var(--border);
+	border-radius: 6px;
+	background: var(--bg);
+	color: var(--text);
+}

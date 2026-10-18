@@ -8,12 +8,14 @@ use leptos_router::{
 pub mod account;
 pub mod auth;
 pub mod invites;
+pub mod plans;
 mod pages;
 #[cfg(feature = "ssr")]
 pub mod server;
 
 use pages::{
-    account::AccountPage, admin_invites::AdminInvitesPage, confirm_email::ConfirmEmailPage,
+    account::AccountPage, admin_invites::AdminInvitesPage, admin_users::AdminUsersPage,
+    confirm_email::ConfirmEmailPage,
     email::EmailPage, invite::InvitePage, layout::ProtectedLayout, login::LoginPage,
     security::SecurityPage,
 };
@@ -59,6 +61,11 @@ pub fn App() -> impl IntoView {
                         <Route path=StaticSegment("") view=AccountPage ssr=SsrMode::Async/>
                         <Route path=StaticSegment("security") view=SecurityPage ssr=SsrMode::Async/>
                         <Route path=StaticSegment("email") view=EmailPage ssr=SsrMode::Async/>
+                        <Route
+                            path=(StaticSegment("admin"), StaticSegment("users"))
+                            view=AdminUsersPage
+                            ssr=SsrMode::Async
+                        />
                         <Route
                             path=(StaticSegment("admin"), StaticSegment("invites"))
                             view=AdminInvitesPage

@@ -91,6 +91,10 @@ pub async fn login(username: String, password: String) -> Result<(), ServerFnErr
     if let Err(error) = state.users.touch_login(&user.id).await {
         log::warn!("failed to record login time for {username}: {error}");
     }
+    // Accounts that predate this app get set up in each service on first login.
+    if let Err(error) = backend::worker::reconcile_user(state, &user.id).await {
+        log::error!("queueing provisioning for {username} failed: {error}");
+    }
 
     ctx.start_session(SessionUser {
         user_id: user.id.clone(),
