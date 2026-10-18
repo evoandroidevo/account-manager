@@ -155,22 +155,6 @@ button {
 	}
 }
 
-.chips {
-	display: flex;
-	flex-wrap: wrap;
-	gap: 0.35rem;
-	margin: 0;
-	padding: 0;
-	list-style: none;
-
-	li {
-		padding: 0.1rem 0.55rem;
-		border: 1px solid var(--border);
-		border-radius: 999px;
-		font-size: 0.85rem;
-	}
-}
-
 @media (max-width: 30rem) {
 	.details {
 		grid-template-columns: 1fr;
@@ -180,4 +164,37 @@ button {
 			margin-bottom: 0.6rem;
 		}
 	}
+}
+
+.nav {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.25rem 1rem;
+	margin-right: auto;
+
+	a {
+		color: var(--muted);
+		text-decoration: none;
+
+		&[aria-current="page"] {
+			color: var(--text);
+			font-weight: 600;
+		}
+
+		&:hover {
+			color: var(--accent);
+		}
+	}
+}
+
+.topbar {
+	flex-wrap: wrap;
+
+	.brand {
+		margin-right: 0.5rem;
+	}
+}
+
+a {
+	color: var(--accent);
 }

@@ -28,7 +28,6 @@ pub struct AccountProfile {
     pub display_name: String,
     pub email: String,
     pub member_since: String,
-    pub groups: Vec<String>,
     pub is_admin: bool,
 }
 
@@ -148,11 +147,6 @@ pub async fn account_overview() -> Result<Option<AccountProfile>, ServerFnError>
             .next()
             .unwrap_or_default()
             .to_owned(),
-        groups: profile
-            .groups
-            .into_iter()
-            .map(|group| group.display_name)
-            .collect(),
     }))
 }
 
