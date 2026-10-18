@@ -24,6 +24,8 @@ pub struct AppConfig {
     #[serde(default)]
     pub auth: AuthConfig,
     #[serde(default)]
+    pub mail: MailConfig,
+    #[serde(default)]
     pub password_policy: PasswordPolicy,
 }
 
@@ -122,6 +124,64 @@ impl Default for InviteConfig {
     fn default() -> Self {
         Self {
             expiration_hours: 48,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum MailTransport {
+    /// Send through `mail.smtp`.
+    Smtp,
+    /// Write each message as an .eml file into `mail.outbox_dir` (dev and tests).
+    File,
+    /// Only log that a message would have been sent.
+    #[default]
+    Log,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(default)]
+pub struct MailConfig {
+    pub transport: MailTransport,
+    pub from: String,
+    pub smtp: SmtpConfig,
+    pub outbox_dir: String,
+    /// How long an email-change confirmation link stays valid.
+    pub email_change_link_hours: i64,
+}
+
+impl Default for MailConfig {
+    fn default() -> Self {
+        Self {
+            transport: MailTransport::Log,
+            from: "Account Manager <no-reply@example.com>".to_owned(),
+            smtp: SmtpConfig::default(),
+            outbox_dir: "./data/outbox".to_owned(),
+            email_change_link_hours: 24,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(default)]
+pub struct SmtpConfig {
+    pub host: String,
+    pub port: u16,
+    /// STARTTLS on `port` (587). When false, implicit TLS is used (465).
+    pub starttls: bool,
+    pub username: String,
+    pub password: String,
+}
+
+impl Default for SmtpConfig {
+    fn default() -> Self {
+        Self {
+            host: "localhost".to_owned(),
+            port: 587,
+            starttls: true,
+            username: String::new(),
+            password: String::new(),
         }
     }
 }
@@ -234,7 +294,7 @@ mod tests {
 
         let path = temp_config(
             "account-manager-config",
-            "server:\n  public_url: https://account.example.com\n  trust_proxy_headers: true\ninvites:\n  expiration_hours: 12\nsession:\n  secure_cookie: false\npassword_policy:\n  minimum_length: 16\n",
+            "server:\n  public_url: https://account.example.com\n  trust_proxy_headers: true\ninvites:\n  expiration_hours: 12\nsession:\n  secure_cookie: false\nmail:\n  transport: smtp\n  smtp:\n    host: mail.example.com\npassword_policy:\n  minimum_length: 16\n",
         );
 
         let config = AppConfig::load(&path).expect("test config should parse");
@@ -243,6 +303,10 @@ mod tests {
         assert!(config.server.trust_proxy_headers);
         assert_eq!(config.invites.expiration_hours, 12);
         assert!(!config.session.secure_cookie);
+        assert_eq!(config.mail.transport, super::MailTransport::Smtp);
+        assert_eq!(config.mail.smtp.host, "mail.example.com");
+        assert_eq!(config.mail.smtp.port, 587);
+        assert_eq!(config.mail.email_change_link_hours, 24);
         assert_eq!(config.session.idle_timeout_minutes, 60);
         assert_eq!(config.password_policy.minimum_length, 16);
         assert!(config.password_policy.require_uppercase);

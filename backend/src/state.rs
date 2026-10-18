@@ -8,6 +8,7 @@ use sqlx::{
 use crate::{
     config::AppConfig,
     lldap::LldapClient,
+    mailer::Mailer,
     repo::{self, audit::AuditLog, invites::InviteRepository, users::UserRepository},
     throttle::LoginThrottle,
 };
@@ -20,6 +21,7 @@ pub struct AppState {
     pub users: UserRepository,
     pub audit: AuditLog,
     pub lldap: LldapClient,
+    pub mailer: Mailer,
     pub login_throttle: LoginThrottle,
 }
 
@@ -49,6 +51,7 @@ impl AppState {
             users: UserRepository::new(pool.clone()),
             audit: AuditLog::new(pool.clone()),
             lldap: LldapClient::new(config.ldap.clone()),
+            mailer: Mailer::new(&config.mail)?,
             login_throttle,
             config: Arc::new(config),
             pool,
