@@ -102,6 +102,41 @@ pub async fn find_active_invite(
     Ok(invite.filter(|invite| invite_status(invite, &now_rfc3339()) == InviteStatus::Active))
 }
 
+/// LLDAP's built-in permission groups (lldap_admin, lldap_password_manager,
+/// lldap_strict_readonly). They control the directory itself, so invites
+/// never offer or grant them.
+pub fn is_lldap_system_group(name: &str) -> bool {
+    name.starts_with("lldap_")
+}
+
+/// Normalizes the groups an invite should grant and checks them against the
+/// directory's groups (`known`).
+pub fn validate_invite_groups(
+    groups: Vec<String>,
+    known: &[String],
+) -> Result<Vec<String>, AccountError> {
+    let mut groups: Vec<String> = groups
+        .into_iter()
+        .map(|group| group.trim().to_owned())
+        .filter(|group| !group.is_empty())
+        .collect();
+    groups.sort();
+    groups.dedup();
+
+    if groups.is_empty() {
+        return Err(rejected("Choose at least one group."));
+    }
+    if let Some(system) = groups.iter().find(|group| is_lldap_system_group(group)) {
+        return Err(AccountError::Rejected(format!(
+            "\"{system}\" is an LLDAP system group and can't be granted by an invite."
+        )));
+    }
+    if let Some(unknown) = groups.iter().find(|group| !known.contains(group)) {
+        return Err(AccountError::Rejected(format!("Unknown group \"{unknown}\".")));
+    }
+    Ok(groups)
+}
+
 pub struct NewInvite {
     /// The only time the raw token exists; it goes into the link shown once.
     pub token: String,
@@ -114,17 +149,6 @@ pub async fn create_invite(
     expiration_hours: i64,
     created_by: &str,
 ) -> Result<NewInvite, AccountError> {
-    let mut groups: Vec<String> = groups
-        .into_iter()
-        .map(|group| group.trim().to_owned())
-        .filter(|group| !group.is_empty())
-        .collect();
-    groups.sort();
-    groups.dedup();
-
-    if groups.is_empty() {
-        return Err(rejected("Choose at least one group."));
-    }
     if !(1..=MAX_INVITE_HOURS).contains(&expiration_hours) {
         return Err(AccountError::Rejected(format!(
             "Expiry must be between 1 and {MAX_INVITE_HOURS} hours."
@@ -136,9 +160,7 @@ pub async fn create_invite(
         .group_names()
         .await
         .map_err(|error| internal("listing LLDAP groups failed", error))?;
-    if let Some(unknown) = groups.iter().find(|group| !known.contains(group)) {
-        return Err(AccountError::Rejected(format!("Unknown group \"{unknown}\".")));
-    }
+    let groups = validate_invite_groups(groups, &known)?;
 
     let token = generate_token();
     let now = Utc::now();
@@ -627,6 +649,31 @@ mod tests {
     fn display_time_is_human_readable_utc() {
         assert_eq!(super::display_time("2026-10-15T19:07:31.123+00:00"), "2026-10-15 19:07 UTC");
         assert_eq!(super::display_time("not a time"), "not a time");
+    }
+
+    #[test]
+    fn invite_groups_are_normalized_and_checked() {
+        use super::{AccountError, validate_invite_groups};
+
+        let known: Vec<String> = ["admins", "jelly", "lldap_admin", "lldap_password_manager", "user"]
+            .map(str::to_owned)
+            .to_vec();
+        let groups = |names: &[&str]| names.iter().map(|name| (*name).to_owned()).collect();
+        let rejection = |result: Result<Vec<String>, AccountError>| match result {
+            Err(AccountError::Rejected(message)) => message,
+            other => panic!("expected a rejection, got {other:?}"),
+        };
+
+        assert_eq!(
+            validate_invite_groups(groups(&[" user", "jelly", "user", ""]), &known).unwrap(),
+            ["jelly", "user"]
+        );
+        assert!(rejection(validate_invite_groups(groups(&[]), &known)).contains("at least one"));
+        assert!(rejection(validate_invite_groups(groups(&["user", "lldap_admin"]), &known))
+            .contains("\"lldap_admin\" is an LLDAP system group"));
+        assert!(rejection(validate_invite_groups(groups(&["lldap_password_manager"]), &known))
+            .contains("system group"));
+        assert!(rejection(validate_invite_groups(groups(&["nope"]), &known)).contains("Unknown group"));
     }
 
     #[test]

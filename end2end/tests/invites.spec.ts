@@ -109,4 +109,14 @@ test("admins see the invites link", async ({ page }) => {
   await page.getByRole("link", { name: "Invites" }).click();
   await expect(page).toHaveURL("/admin/invites");
   await expect(page.getByRole("heading", { name: "Create an invite" })).toBeVisible();
+
+  // Only regular groups are offered; LLDAP's own permission groups are hidden.
+  const groups = page.getByRole("group", { name: "Groups the new account joins" });
+  await expect(groups.getByRole("checkbox")).not.toHaveCount(0);
+  for (const name of await groups.getByRole("checkbox").evaluateAll((boxes) =>
+    boxes.map((box) => box.parentElement?.textContent?.trim() ?? ""),
+  )) {
+    expect(name).not.toMatch(/^lldap_/);
+  }
+  await expect(groups.getByRole("checkbox", { name: "lldap_admin" })).toHaveCount(0);
 });

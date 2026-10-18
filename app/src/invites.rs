@@ -106,11 +106,15 @@ pub async fn get_invite_defaults() -> Result<InviteDefaults, ServerFnError> {
     let ctx = ctx()?;
     ctx.require_admin().await?;
     let state = &ctx.state;
-    let groups = state
+    // LLDAP's own permission groups are never offered (or accepted).
+    let groups: Vec<String> = state
         .lldap
         .group_names()
         .await
-        .map_err(|error| internal(format!("listing LLDAP groups failed: {error}")))?;
+        .map_err(|error| internal(format!("listing LLDAP groups failed: {error}")))?
+        .into_iter()
+        .filter(|group| !backend::accounts::is_lldap_system_group(group))
+        .collect();
     let default_groups = state
         .config
         .invites
