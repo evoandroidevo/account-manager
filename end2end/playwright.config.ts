@@ -29,6 +29,14 @@ export default defineConfig({
     {
       name: "chromium",
       use: { ...devices["Desktop Chrome"] },
+      testIgnore: /throttle\.spec\.ts/,
+    },
+    {
+      // Blocks the test client's IP, so it runs after everything else.
+      name: "throttle",
+      use: { ...devices["Desktop Chrome"] },
+      testMatch: /throttle\.spec\.ts/,
+      dependencies: ["chromium"],
     },
   ],
   webServer: {
@@ -36,16 +44,26 @@ export default defineConfig({
     cwd: "..",
     url: `${BASE_URL}/health`,
     reuseExistingServer: false,
+    // Show server logs (errors behind "Something went wrong") in the test output.
+    stdout: "pipe",
+    stderr: "pipe",
     timeout: 30 * 1000,
     env: {
       LEPTOS_OUTPUT_NAME: "account-manager",
       LEPTOS_SITE_ROOT: "target/site",
       LEPTOS_SITE_PKG_DIR: "pkg",
       LEPTOS_SITE_ADDR: "127.0.0.1:3000",
-      APP_CONFIG: "config.yaml",
+      // No config file: the built-in defaults match docker-compose.lldap-dev.yml,
+      // and everything run-specific is set here, so a local config.yaml can't
+      // change the results.
+      APP_CONFIG: "end2end/no-such-config.yaml",
+      APP__DATABASE__URL: "sqlite://./data/e2e.db",
       APP__SERVER__PUBLIC_URL: BASE_URL,
       APP__SESSION__SECURE_COOKIE: "false",
       APP__AUTH__LOGIN_MAX_ATTEMPTS: "5",
+      APP__MAIL__TRANSPORT: "file",
+      APP__MAIL__OUTBOX_DIR: "data/e2e-outbox",
+      APP__MAIL__FROM: "Account Manager <no-reply@example.com>",
     },
   },
 });
