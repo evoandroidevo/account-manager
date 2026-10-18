@@ -54,6 +54,12 @@ impl UserRepository {
         .await
     }
 
+    pub async fn all(&self) -> Result<Vec<UserRecord>, sqlx::Error> {
+        sqlx::query_as::<_, UserRecord>(&format!("SELECT {USER_COLUMNS} FROM users ORDER BY username"))
+            .fetch_all(&self.pool)
+            .await
+    }
+
     pub async fn find_by_id(&self, id: &str) -> Result<Option<UserRecord>, sqlx::Error> {
         sqlx::query_as::<_, UserRecord>(&format!("SELECT {USER_COLUMNS} FROM users WHERE id = ?"))
             .bind(id)
