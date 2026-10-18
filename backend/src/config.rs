@@ -658,4 +658,19 @@ tiers:
         check(no_scheme, "must start with http://");
     }
 
+    #[test]
+    fn the_committed_example_and_test_configs_are_valid() {
+        let _guard = ENV_LOCK
+            .get_or_init(|| Mutex::new(()))
+            .lock()
+            .expect("env lock should be available");
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        for file in ["config.example.yaml", "end2end/e2e-config.yaml"] {
+            let path = root.join(file);
+            assert!(path.exists(), "{file} is missing");
+            let config = AppConfig::load(&path).unwrap_or_else(|error| panic!("{file}: {error}"));
+            config.validate().unwrap_or_else(|error| panic!("{file}: {error}"));
+            assert!(config.tiers.len() >= 2, "{file} should define several tiers");
+        }
+    }
 }

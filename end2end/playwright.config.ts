@@ -6,7 +6,7 @@ const BASE_URL = "http://127.0.0.1:3000";
  * End-to-end tests against the real server and the dev LLDAP.
  *
  * Prerequisites (from the repo root):
- *   docker compose -f docker-compose.lldap-dev.yml up -d
+ *   docker compose -f docker-compose.lldap-dev.yml up -d   # LLDAP, Jellyfin, Seerr
  *   cargo leptos build
  *
  * The server is started fresh for every run so the in-memory login
@@ -40,23 +40,24 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: "./target/debug/server",
+    // Sets up the dev Jellyfin and Seerr, then starts target/debug/server.
+    command: "node end2end/start-server.mjs",
     cwd: "..",
     url: `${BASE_URL}/health`,
     reuseExistingServer: false,
     // Show server logs (errors behind "Something went wrong") in the test output.
     stdout: "pipe",
     stderr: "pipe",
-    timeout: 30 * 1000,
+    // First run includes the Jellyfin and Seerr setup wizards.
+    timeout: 120 * 1000,
     env: {
       LEPTOS_OUTPUT_NAME: "account-manager",
       LEPTOS_SITE_ROOT: "target/site",
       LEPTOS_SITE_PKG_DIR: "pkg",
       LEPTOS_SITE_ADDR: "127.0.0.1:3000",
-      // No config file: the built-in defaults match docker-compose.lldap-dev.yml,
-      // and everything run-specific is set here, so a local config.yaml can't
-      // change the results.
-      APP_CONFIG: "end2end/no-such-config.yaml",
+      // Its own config (tiers), never the developer's config.yaml, so local
+      // settings can't change the results.
+      APP_CONFIG: "end2end/e2e-config.yaml",
       APP__DATABASE__URL: "sqlite://./data/e2e.db",
       APP__SERVER__PUBLIC_URL: BASE_URL,
       APP__SESSION__SECURE_COOKIE: "false",

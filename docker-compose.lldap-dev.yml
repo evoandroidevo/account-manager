@@ -47,5 +47,48 @@ services:
       - ./lldap-bootstrap:/bootstrap:ro
     restart: "no"
 
+  # Disposable Jellyfin and Seerr for the end-to-end tests. Versions match
+  # production. end2end/services.mjs runs their setup wizards and creates API
+  # keys the first time the tests start, so no manual setup is needed.
+  # Admin login for both: admin / dev-only-password-change-me
+  jellyfin:
+    image: jellyfin/jellyfin:10.11.11
+    container_name: account-manager-jellyfin
+    ports:
+      - "127.0.0.1:8096:8096"
+    environment:
+      TZ: "UTC"
+    volumes:
+      - jellyfin-config:/config
+      - jellyfin-cache:/cache
+    # Empty library folders, so tier library restrictions can be tested.
+    tmpfs:
+      - /media/movies
+      - /media/shows
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8096/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  seerr:
+    image: ghcr.io/seerr-team/seerr:v3.5.0
+    container_name: account-manager-seerr
+    init: true
+    depends_on:
+      jellyfin:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:5055:5055"
+    environment:
+      TZ: "UTC"
+      PORT: "5055"
+    volumes:
+      - seerr-config:/app/config
+
 volumes:
   lldap-data:
+  jellyfin-config:
+  jellyfin-cache:
+  seerr-config:
