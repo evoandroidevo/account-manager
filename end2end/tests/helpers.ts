@@ -143,3 +143,72 @@ export async function waitForEmail(to: string, subject: string): Promise<string>
     .toBe(true);
   return found;
 }
+
+// --- Dev Jellyfin and Seerr (set up by end2end/services.mjs) -----------------
+
+type Services = { jellyfin: { url: string; apiKey: string }; seerr: { url: string; apiKey: string } };
+
+function services(): Services {
+  return JSON.parse(fs.readFileSync(path.resolve(__dirname, "../../data/e2e-services.json"), "utf8"));
+}
+
+async function jellyfinGet(apiPath: string) {
+  const { jellyfin } = services();
+  const response = await fetch(`${jellyfin.url}${apiPath}`, {
+    headers: { Authorization: `MediaBrowser Token="${jellyfin.apiKey}"` },
+  });
+  if (!response.ok) throw new Error(`Jellyfin ${apiPath}: ${response.status}`);
+  return response.json();
+}
+
+async function seerrGet(apiPath: string) {
+  const { seerr } = services();
+  const response = await fetch(`${seerr.url}/api/v1${apiPath}`, {
+    headers: { "X-Api-Key": seerr.apiKey },
+  });
+  if (!response.ok) throw new Error(`Seerr ${apiPath}: ${response.status}`);
+  return response.json();
+}
+
+/** The Jellyfin user (with Policy) named `username`, if it exists. */
+export async function jellyfinUser(username: string) {
+  const users: any[] = await jellyfinGet("/Users");
+  return users.find((user) => user.Name.toLowerCase() === username.toLowerCase());
+}
+
+export async function jellyfinLibraryId(name: string): Promise<string> {
+  const folders = await jellyfinGet("/Library/MediaFolders");
+  return folders.Items.find((item: any) => item.Name === name).Id;
+}
+
+/** The Seerr user imported from Jellyfin user `jellyfinId`, if any. */
+export async function seerrUser(username: string, jellyfinId: string) {
+  const normalize = (id: string) => id.replace(/-/g, "").toLowerCase();
+  const page = await seerrGet(`/user?take=100&q=${encodeURIComponent(username)}`);
+  return page.results.find(
+    (user: any) => user.jellyfinUserId && normalize(user.jellyfinUserId) === normalize(jellyfinId),
+  );
+}
+
+export async function seerrQuotas(seerrId: number) {
+  const settings = await seerrGet(`/user/${seerrId}/settings/main`);
+  return {
+    movie: [settings.movieQuotaLimit, settings.movieQuotaDays],
+    tv: [settings.tvQuotaLimit, settings.tvQuotaDays],
+  };
+}
+
+/** Signs in to Jellyfin as a user (through the LDAP plugin); returns the HTTP status. */
+export async function jellyfinLogin(username: string, password: string): Promise<number> {
+  const { jellyfin } = services();
+  const response = await fetch(`${jellyfin.url}/Users/AuthenticateByName`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      Authorization:
+        'MediaBrowser Client="account-manager-e2e", Device="e2e", DeviceId="e2e-login", Version="1.0"',
+    },
+    body: JSON.stringify({ Username: username, Pw: password }),
+  });
+  return response.status;
+}

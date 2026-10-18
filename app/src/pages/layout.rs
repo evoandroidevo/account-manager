@@ -66,7 +66,13 @@ fn Chrome(user: CurrentUser) -> impl IntoView {
                 </A>
                 <A href="/security">"Password"</A>
                 <A href="/email">"Email"</A>
-                {is_admin.then(|| view! { <A href="/admin/invites">"Invites"</A> })}
+                {is_admin
+                    .then(|| {
+                        view! {
+                            <A href="/admin/users">"Users"</A>
+                            <A href="/admin/invites">"Invites"</A>
+                        }
+                    })}
             </nav>
             <span class="who">
                 {username}

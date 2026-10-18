@@ -1,0 +1,40 @@
+# Config for the Playwright run. LDAP settings use the built-in defaults,
+# which match docker-compose.lldap-dev.yml; run-specific values (database,
+# outbox, public URL) are set as environment variables in playwright.config.ts.
+# Jellyfin and Seerr are enabled by end2end/start-server.mjs, which sets up
+# the dev containers and passes their URLs and API keys as environment
+# variables.
+
+invites:
+  default_groups: [user, jelly]
+
+default_tier: free
+
+tiers:
+  - id: free
+    name: Free
+    description: The standard plan.
+    lldap_groups: [user, jelly]
+    jellyfin:
+      max_active_sessions: 1
+      remote_bitrate_limit_mbps: 8
+      transcoding: true
+      downloads: false
+    seerr:
+      movie_quota: { limit: 2, days: 7 }
+      tv_quota: { limit: 1, days: 7 }
+      permissions: [REQUEST]
+  - id: plus
+    name: Plus
+    description: The bigger plan.
+    lldap_groups: [user, jelly, plus]
+    jellyfin:
+      max_active_sessions: 3
+      remote_bitrate_limit_mbps: 0
+      transcoding: true
+      downloads: true
+      libraries: [Movies]
+    seerr:
+      movie_quota: { limit: 10, days: 7 }
+      tv_quota: { limit: 5, days: 7 }
+      permissions: [REQUEST, AUTO_APPROVE]

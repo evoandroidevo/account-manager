@@ -277,6 +277,12 @@ pub async fn signup(
         .await
         .map_err(|error| internal("user mirror failed", error))?;
 
+    // Set up the new account in every service (LLDAP tier groups, Jellyfin,
+    // Seerr). The worker does the work; signup doesn't wait for it.
+    if let Err(error) = crate::worker::reconcile_user(state, &user.id).await {
+        log::error!("queueing provisioning for {username} failed: {error}");
+    }
+
     state
         .audit
         .record_best_effort(

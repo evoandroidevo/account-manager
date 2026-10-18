@@ -10,9 +10,11 @@ use crate::{
     lldap::LldapClient,
     mailer::Mailer,
     repo::{
-        self, audit::AuditLog, email_changes::EmailChangeRepository, invites::InviteRepository,
-        users::UserRepository,
+        self, audit::AuditLog, email_changes::EmailChangeRepository,
+        entitlements::EntitlementRepository, invites::InviteRepository,
+        provisioning::ProvisioningRepository, users::UserRepository,
     },
+    services::Services,
     throttle::LoginThrottle,
 };
 
@@ -23,14 +25,18 @@ pub struct AppState {
     pub invites: InviteRepository,
     pub users: UserRepository,
     pub email_changes: EmailChangeRepository,
+    pub entitlements: EntitlementRepository,
+    pub provisioning: ProvisioningRepository,
     pub audit: AuditLog,
     pub lldap: LldapClient,
     pub mailer: Mailer,
+    pub services: Services,
     pub login_throttle: LoginThrottle,
 }
 
 impl AppState {
     pub async fn initialize(config: AppConfig) -> Result<Self, Box<dyn std::error::Error>> {
+        config.validate().map_err(|error| format!("invalid configuration: {error}"))?;
         let options = SqliteConnectOptions::from_str(&config.database.url)?
             .create_if_missing(true)
             .foreign_keys(true);
@@ -54,6 +60,9 @@ impl AppState {
             invites: InviteRepository::new(pool.clone()),
             users: UserRepository::new(pool.clone()),
             email_changes: EmailChangeRepository::new(pool.clone()),
+            entitlements: EntitlementRepository::new(pool.clone()),
+            provisioning: ProvisioningRepository::new(pool.clone()),
+            services: Services::new(&config),
             audit: AuditLog::new(pool.clone()),
             lldap: LldapClient::new(config.ldap.clone()),
             mailer: Mailer::new(&config.mail)?,

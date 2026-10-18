@@ -1,6 +1,8 @@
 pub mod audit;
 pub mod email_changes;
+pub mod entitlements;
 pub mod invites;
+pub mod provisioning;
 pub mod users;
 
 use sqlx::SqlitePool;

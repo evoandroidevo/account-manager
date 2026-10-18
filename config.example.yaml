@@ -22,7 +22,7 @@ ldap:
   # Service account allowed to create users and set passwords
   # (member of lldap_admin or lldap_password_manager).
   username: account-manager
-  password: change-me  # prefer APP__LDAP__PASSWORD
+  password: change-me # prefer APP__LDAP__PASSWORD
 
 invites:
   expiration_hours: 48
@@ -49,9 +49,9 @@ mail:
   smtp:
     host: mail.smtp2go.com
     port: 587
-    starttls: true   # false = implicit TLS (usually port 465)
+    starttls: true # false = implicit TLS (usually port 465)
     username: change-me
-    password: change-me  # prefer APP__MAIL__SMTP__PASSWORD
+    password: change-me # prefer APP__MAIL__SMTP__PASSWORD
   outbox_dir: ./data/outbox
   email_change_link_hours: 24
 
@@ -61,3 +61,93 @@ password_policy:
   require_lowercase: true
   require_number: true
   require_special: true
+
+# --- Services whose accounts follow each user's tier -------------------------
+# Accounts are created and updated by a background worker. Jellyfin and Seerr
+# administrators (and Seerr's owner account) are never modified.
+
+jellyfin:
+  enabled: true
+  url: http://192.168.1.19:8096
+  # Dashboard -> API Keys. Prefer APP__JELLYFIN__API_KEY.
+  api_key: change-me
+  # Login provider for accounts created here, so users sign in with their
+  # LLDAP password (needs the LDAP plugin). Check GET /Auth/Providers if unsure.
+  auth_provider_id: Jellyfin.Plugin.LDAP_Auth.LdapAuthenticationProviderPlugin
+  password_reset_provider_id: Jellyfin.Plugin.LDAP_Auth.LdapAuthenticationProviderPlugin
+
+seerr:
+  enabled: true
+  # Reach Seerr directly (container name or LAN address), not through Caddy:
+  # the public hostname sits behind Authelia and would block API calls.
+  url: http://seerr:5055
+  # Settings -> General -> API Key. Prefer APP__SEERR__API_KEY.
+  api_key: change-me
+
+# --- Tiers ---------------------------------------------------------------------
+# Everyone is on default_tier unless an admin sets another on /admin/users
+# (and, later, a Whop payment). Group membership is managed only for groups
+# listed under some tier; other groups are left alone.
+
+default_tier: free
+
+tiers:
+  - id: free
+    name: Free
+    description: One stream at a time, standard quality away from home, no transcoding(If device doesnt support video wont play).
+    lldap_groups: [user, jelly]
+    jellyfin:
+      max_active_sessions: 1 # 0 = unlimited
+      remote_bitrate_limit_mbps: 8 # 0 = unlimited
+      transcoding: false
+      downloads: false
+      # libraries: [Movies, Shows]  # leave out for all libraries
+    seerr:
+      movie_quota: { limit: 1, days: 7 } # leave out to use Seerr's global default
+      tv_quota: { limit: 1, days: 7 }
+      permissions: [REQUEST]
+
+  - id: plus
+    name: Plus
+    description: Three streams, higher quality, transcoding and more requests.
+    price_label: "$5/month"
+    lldap_groups: [user, jelly, plus]
+    jellyfin:
+      max_active_sessions: 3
+      remote_bitrate_limit_mbps: 15
+      transcoding: true
+      downloads: false
+    seerr:
+      movie_quota: { limit: 3, days: 7 }
+      tv_quota: { limit: 3, days: 14 }
+      permissions: [REQUEST]
+
+  - id: premium
+    name: Premium
+    description: Five streams, up to high end 1080p quality streaming, downloads and more requests.
+    price_label: "$15/month"
+    lldap_groups: [user, jelly, premium]
+    jellyfin:
+      max_active_sessions: 5
+      remote_bitrate_limit_mbps: 25
+      transcoding: true
+      downloads: true
+    seerr:
+      movie_quota: { limit: 5, days: 7 }
+      tv_quota: { limit: 4, days: 14 }
+      permissions: [REQUEST]
+
+  - id: premiumplus
+    name: Premium+
+    description: Unlimited streams, Up to 4k quality streaming, downloads, auto approved requests and live TV(Once available).
+    price_label: "$20/month"
+    lldap_groups: [user, jelly, premiumplus]
+    jellyfin:
+      max_active_sessions: 0
+      remote_bitrate_limit_mbps: 75
+      transcoding: true
+      downloads: true
+    seerr:
+      movie_quota: { limit: 5, days: 7 }
+      tv_quota: { limit: 4, days: 14 }
+      permissions: [REQUEST, AUTO_APPROVE]
