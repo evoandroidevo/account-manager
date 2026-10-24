@@ -17,6 +17,8 @@ const WHOP = { apiKey: "test-whop-key", webhookSecret: "ws_test_secret" };
  */
 export default defineConfig({
   testDir: "./tests",
+  // Deletes the e2e accounts from LLDAP, Jellyfin and Seerr afterwards.
+  globalTeardown: "./cleanup.mjs",
   timeout: 30 * 1000,
   expect: { timeout: 5000 },
   fullyParallel: false,

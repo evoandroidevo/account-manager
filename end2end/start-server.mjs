@@ -3,10 +3,17 @@
 // Playwright starts web servers before globalSetup, so this can't live there.
 
 import { spawn } from "node:child_process";
+import { rmSync } from "node:fs";
 
 import { setupServices } from "./services.mjs";
 
 const { jellyfin, seerr } = await setupServices();
+
+// Start from an empty database: the previous run's accounts were deleted
+// from LLDAP and the services by cleanup.mjs.
+for (const suffix of ["", "-wal", "-shm"]) {
+  rmSync(`data/e2e.db${suffix}`, { force: true });
+}
 
 const server = spawn("./target/debug/server", [], {
   stdio: "inherit",
