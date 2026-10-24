@@ -171,6 +171,7 @@ mod tests {
             description: String::new(),
             price_label: None,
             lldap_groups: Vec::new(),
+            whop_plan_ids: Vec::new(),
             jellyfin: None,
             seerr: None,
         }
