@@ -14,6 +14,7 @@ pub struct JellyfinClient {
     api_key: String,
     auth_provider_id: String,
     password_reset_provider_id: String,
+    login_attempts_before_lockout: Option<i32>,
 }
 
 impl JellyfinClient {
@@ -24,6 +25,7 @@ impl JellyfinClient {
             api_key: config.api_key.clone(),
             auth_provider_id: config.auth_provider_id.clone(),
             password_reset_provider_id: config.password_reset_provider_id.clone(),
+            login_attempts_before_lockout: config.login_attempts_before_lockout,
         }
     }
 
@@ -34,7 +36,8 @@ impl JellyfinClient {
     }
 
     /// Makes sure `username` has a Jellyfin account and applies the tier's
-    /// policy. Administrators are never changed.
+    /// policy plus the settings every managed account shares. Administrators
+    /// are never changed.
     pub async fn sync(
         &self,
         username: &str,
@@ -59,8 +62,13 @@ impl JellyfinClient {
             ));
         }
 
+        let fetched = policy.clone();
+        self.apply_shared(&mut policy);
         if let Some(tier) = tier {
             self.apply_tier(&mut policy, tier).await?;
+        }
+        // Only write when something changed.
+        if policy != fetched {
             let response = self
                 .request(reqwest::Method::POST, &format!("/Users/{id}/Policy"))
                 .json(&policy)
@@ -70,6 +78,15 @@ impl JellyfinClient {
             check(response, "updating Jellyfin policy").await?;
         }
         Ok(SyncOutcome::done(Some(id)))
+    }
+
+    /// Settings for every managed account, whatever the tier: recording
+    /// management stays admin-only, and the configured login lockout.
+    fn apply_shared(&self, policy: &mut Value) {
+        policy["EnableLiveTvManagement"] = json!(false);
+        if let Some(attempts) = self.login_attempts_before_lockout {
+            policy["LoginAttemptsBeforeLockout"] = json!(attempts);
+        }
     }
 
     /// Writes the tier's settings into a policy fetched from Jellyfin. Only
@@ -89,6 +106,9 @@ impl JellyfinClient {
         }
         if let Some(downloads) = tier.downloads {
             policy["EnableContentDownloading"] = json!(downloads);
+        }
+        if let Some(live_tv) = tier.live_tv {
+            policy["EnableLiveTvAccess"] = json!(live_tv);
         }
         match &tier.libraries {
             None => {
@@ -246,6 +266,9 @@ mod tests {
             "EnableAllFolders": true,
             "EnabledFolders": [],
             "BlockedTags": ["keep-me"],
+            "EnableLiveTvAccess": true,
+            "EnableLiveTvManagement": true,
+            "LoginAttemptsBeforeLockout": -1,
             "AuthenticationProviderId": LDAP,
             "PasswordResetProviderId": "x"
         })
@@ -257,6 +280,7 @@ mod tests {
             remote_bitrate_limit_mbps: Some(8),
             transcoding: Some(false),
             downloads: Some(true),
+            live_tv: Some(false),
             libraries: Some(vec!["movies".to_owned()]),
         }
     }
@@ -294,7 +318,11 @@ mod tests {
                 "EnableContentDownloading": true,
                 "EnableAllFolders": false,
                 "EnabledFolders": ["lib-movies"],
+                "EnableLiveTvAccess": false,
+                "EnableLiveTvManagement": false,
                 "BlockedTags": ["keep-me"],
+                // No lockout configured: the account's own setting is kept.
+                "LoginAttemptsBeforeLockout": -1,
             })))
             .respond_with(ResponseTemplate::new(204))
             .expect(1)
@@ -327,7 +355,11 @@ mod tests {
             .and(body_partial_json(json!({ "Name": "newbie" })))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({
                 "Name": "newbie", "Id": "u2",
-                "Policy": { "IsAdministrator": false, "AuthenticationProviderId": "default" }
+                "Policy": {
+                    "IsAdministrator": false,
+                    "AuthenticationProviderId": "default",
+                    "EnableLiveTvManagement": false
+                }
             })))
             .expect(1)
             .mount(&server)
@@ -366,6 +398,63 @@ mod tests {
 
         let error = client(&server).sync("newbie", None).await.unwrap_err();
         assert!(error.contains("LDAP plugin"), "{error}");
+    }
+
+    #[tokio::test]
+    async fn applies_the_shared_lockout_even_without_tier_settings() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/Users"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+                { "Name": "alice", "Id": "u1", "Policy": policy(false) }
+            ])))
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/Users/u1/Policy"))
+            .and(body_partial_json(json!({
+                "LoginAttemptsBeforeLockout": 5,
+                "EnableLiveTvManagement": false,
+                // Untouched without tier settings.
+                "EnableLiveTvAccess": true,
+                "MaxActiveSessions": 0,
+            })))
+            .respond_with(ResponseTemplate::new(204))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let client = JellyfinClient::new(&JellyfinConfig {
+            enabled: true,
+            url: server.uri(),
+            api_key: "secret".to_owned(),
+            login_attempts_before_lockout: Some(5),
+            ..JellyfinConfig::default()
+        });
+        client.sync("alice", None).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn skips_the_update_when_nothing_changes() {
+        let server = MockServer::start().await;
+        let mut current = policy(false);
+        current["EnableLiveTvManagement"] = json!(false);
+        Mock::given(method("GET"))
+            .and(path("/Users"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+                { "Name": "alice", "Id": "u1", "Policy": current }
+            ])))
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(204))
+            .expect(0)
+            .mount(&server)
+            .await;
+
+        let tier = JellyfinTier { max_active_sessions: Some(0), ..JellyfinTier::default() };
+        let outcome = client(&server).sync("alice", Some(&tier)).await.unwrap();
+        assert_eq!(outcome.remote_id.as_deref(), Some("u1"));
     }
 
     #[tokio::test]
