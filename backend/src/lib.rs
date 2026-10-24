@@ -6,6 +6,7 @@ pub mod accounts;
 pub mod config;
 pub mod lldap;
 pub mod mailer;
+pub mod plan_change;
 pub mod repo;
 pub mod services;
 pub mod session;
@@ -13,6 +14,7 @@ pub mod state;
 pub mod throttle;
 pub mod tiers;
 pub mod validation;
+pub mod whop;
 pub mod worker;
 
 pub use state::AppState;

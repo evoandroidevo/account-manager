@@ -12,10 +12,11 @@ use crate::{
     repo::{
         self, audit::AuditLog, email_changes::EmailChangeRepository,
         entitlements::EntitlementRepository, invites::InviteRepository,
-        provisioning::ProvisioningRepository, users::UserRepository,
+        provisioning::ProvisioningRepository, users::UserRepository, whop::WhopRepository,
     },
     services::Services,
     throttle::LoginThrottle,
+    whop::WhopClient,
 };
 
 #[derive(Clone, Debug)]
@@ -27,10 +28,13 @@ pub struct AppState {
     pub email_changes: EmailChangeRepository,
     pub entitlements: EntitlementRepository,
     pub provisioning: ProvisioningRepository,
+    pub whop: WhopRepository,
     pub audit: AuditLog,
     pub lldap: LldapClient,
     pub mailer: Mailer,
     pub services: Services,
+    /// Present when `whop.enabled`.
+    pub whop_client: Option<WhopClient>,
     pub login_throttle: LoginThrottle,
 }
 
@@ -39,7 +43,10 @@ impl AppState {
         config.validate().map_err(|error| format!("invalid configuration: {error}"))?;
         let options = SqliteConnectOptions::from_str(&config.database.url)?
             .create_if_missing(true)
-            .foreign_keys(true);
+            .foreign_keys(true)
+            // Wait for the write lock instead of failing: a burst of sync
+            // jobs must not make a login error out (sqlx's default is 5s).
+            .busy_timeout(Duration::from_secs(30));
         if let Some(parent) = options.get_filename().parent()
             && !parent.as_os_str().is_empty()
         {
@@ -63,6 +70,8 @@ impl AppState {
             entitlements: EntitlementRepository::new(pool.clone()),
             provisioning: ProvisioningRepository::new(pool.clone()),
             services: Services::new(&config),
+            whop: WhopRepository::new(pool.clone()),
+            whop_client: config.whop.enabled.then(|| WhopClient::new(&config.whop)),
             audit: AuditLog::new(pool.clone()),
             lldap: LldapClient::new(config.ldap.clone()),
             mailer: Mailer::new(&config.mail)?,

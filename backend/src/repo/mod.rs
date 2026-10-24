@@ -4,6 +4,7 @@ pub mod entitlements;
 pub mod invites;
 pub mod provisioning;
 pub mod users;
+pub mod whop;
 
 use sqlx::SqlitePool;
 

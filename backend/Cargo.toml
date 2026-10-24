@@ -4,8 +4,10 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+base64 = "0.22"
 chrono = { version = "0.4", features = ["clock"] }
 config = { version = "0.15", default-features = false, features = ["yaml"] }
+hmac = "0.12"
 ldap3 = { version = "0.12", default-features = false, features = ["tls-rustls-ring"] }
 lettre = { version = "0.11", default-features = false, features = ["builder", "smtp-transport", "tokio1", "tokio1-rustls", "ring", "webpki-roots", "file-transport", "hostname"] }
 log.workspace = true

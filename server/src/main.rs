@@ -2,11 +2,12 @@ use std::{net::SocketAddr, sync::Arc, time::Duration as StdDuration};
 
 use app::*;
 use axum::{
+    body::Bytes,
     extract::{Request, State},
-    http::{header, Method, StatusCode},
+    http::{header, HeaderMap, Method, StatusCode},
     middleware::{self, Next},
     response::{IntoResponse, Response},
-    routing::get,
+    routing::{get, post},
     Router,
 };
 use backend::{
@@ -67,6 +68,9 @@ async fn main() {
 
     let app = Router::new()
         .route("/health", get(|| async { "ok" }))
+        // Server-to-server (no Origin header), so origin_guard lets it through;
+        // the Whop signature is the authentication.
+        .route("/api/webhooks/whop", post(whop_webhook).with_state(state.clone()))
         .leptos_routes_with_context(
             &leptos_options,
             routes,
@@ -94,6 +98,21 @@ async fn main() {
     )
     .await
     .expect("server must run");
+}
+
+/// POST /api/webhooks/whop: Whop membership events, verified against the raw body.
+async fn whop_webhook(State(state): State<AppState>, headers: HeaderMap, body: Bytes) -> Response {
+    let header = |name: &str| headers.get(name).and_then(|value| value.to_str().ok());
+    let reply = backend::whop::handle_webhook(
+        &state,
+        header("webhook-id"),
+        header("webhook-timestamp"),
+        header("webhook-signature"),
+        &body,
+    )
+    .await;
+    let status = StatusCode::from_u16(reply.status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+    (status, reply.body).into_response()
 }
 
 /// CSRF defence for state-changing requests: browsers always send `Origin`
