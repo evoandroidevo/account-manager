@@ -31,6 +31,8 @@ pub struct AppConfig {
     pub jellyfin: JellyfinConfig,
     #[serde(default)]
     pub seerr: SeerrConfig,
+    #[serde(default)]
+    pub whop: WhopConfig,
     /// Tier every account gets unless an admin (or, later, a payment) sets another.
     #[serde(default = "default_tier_id")]
     pub default_tier: String,
@@ -51,6 +53,7 @@ impl Default for AppConfig {
             password_policy: PasswordPolicy::default(),
             jellyfin: JellyfinConfig::default(),
             seerr: SeerrConfig::default(),
+            whop: WhopConfig::default(),
             default_tier: default_tier_id(),
             tiers: default_tiers(),
         }
@@ -99,6 +102,36 @@ impl AppConfig {
                 return Err(format!("{name}.url must start with http:// or https:// (got \"{url}\")"));
             }
         }
+        if self.whop.enabled {
+            let whop = &self.whop;
+            for (field, value) in [
+                ("api_url", &whop.api_url),
+                ("api_key", &whop.api_key),
+                ("account_id", &whop.account_id),
+                ("webhook_secret", &whop.webhook_secret),
+            ] {
+                if value.trim().is_empty() {
+                    return Err(format!("whop is enabled but whop.{field} is empty"));
+                }
+            }
+        }
+        let mut plan_owner = std::collections::HashMap::new();
+        for tier in &self.tiers {
+            for plan in &tier.whop_plan_ids {
+                if let Some(other) = plan_owner.insert(plan.as_str(), tier.id.as_str()) {
+                    return Err(format!(
+                        "Whop plan \"{plan}\" is listed under both \"{other}\" and \"{}\"",
+                        tier.id
+                    ));
+                }
+            }
+        }
+        if self.jellyfin.login_attempts_before_lockout.is_some_and(|attempts| attempts < -1) {
+            return Err(
+                "jellyfin.login_attempts_before_lockout must be -1 (never), 0 (Jellyfin's default) or more"
+                    .to_owned(),
+            );
+        }
         if self.seerr.enabled && !self.jellyfin.enabled {
             return Err("seerr imports users from Jellyfin, so it needs jellyfin enabled".to_owned());
         }
@@ -107,6 +140,18 @@ impl AppConfig {
 
     pub fn tier(&self, id: &str) -> Option<&TierConfig> {
         self.tiers.iter().find(|tier| tier.id == id)
+    }
+
+    /// The tier a Whop plan grants.
+    pub fn tier_for_whop_plan(&self, plan_id: &str) -> Option<&TierConfig> {
+        self.tiers
+            .iter()
+            .find(|tier| tier.whop_plan_ids.iter().any(|plan| plan == plan_id))
+    }
+
+    /// Tiers are listed from lowest to highest; a later tier ranks higher.
+    pub fn tier_rank(&self, id: &str) -> usize {
+        self.tiers.iter().position(|tier| tier.id == id).unwrap_or(0)
     }
 
     /// Every LLDAP group some tier grants. Membership in these is managed by
@@ -156,6 +201,7 @@ fn default_tiers() -> Vec<TierConfig> {
         description: String::new(),
         price_label: None,
         lldap_groups: Vec::new(),
+        whop_plan_ids: Vec::new(),
         jellyfin: None,
         seerr: None,
     }]
@@ -174,6 +220,10 @@ pub struct TierConfig {
     /// LLDAP groups members of this tier belong to.
     #[serde(default)]
     pub lldap_groups: Vec<String>,
+    /// Whop plans (`plan_…`) that grant this tier. The first one is used for
+    /// the upgrade button; others (e.g. a yearly plan) are also recognised.
+    #[serde(default)]
+    pub whop_plan_ids: Vec<String>,
     /// Omit to leave Jellyfin settings alone for this tier.
     #[serde(default)]
     pub jellyfin: Option<JellyfinTier>,
@@ -193,6 +243,10 @@ pub struct JellyfinTier {
     /// Allow transcoding (video and audio) and remuxing.
     pub transcoding: Option<bool>,
     pub downloads: Option<bool>,
+    /// Watch Live TV. Jellyfin turns this on for new accounts, so set it to
+    /// false on tiers that shouldn't have it. (Managing recordings is always
+    /// left to administrators.)
+    pub live_tv: Option<bool>,
     /// Library names to give access to; leave out for all libraries.
     pub libraries: Option<Vec<String>>,
 }
@@ -227,6 +281,11 @@ pub struct JellyfinConfig {
     /// their LLDAP password. Check GET /Auth/Providers if unsure.
     pub auth_provider_id: String,
     pub password_reset_provider_id: String,
+    /// Failed logins before Jellyfin locks (disables) an account, for every
+    /// managed account: -1 never locks, 0 uses Jellyfin's default (3). Leave
+    /// out to keep each account's current setting. A locked account stays
+    /// disabled until an admin re-enables it in Jellyfin.
+    pub login_attempts_before_lockout: Option<i32>,
 }
 
 impl Default for JellyfinConfig {
@@ -239,6 +298,39 @@ impl Default for JellyfinConfig {
                 .to_owned(),
             password_reset_provider_id:
                 "Jellyfin.Server.Implementations.Users.DefaultPasswordResetProvider".to_owned(),
+            login_attempts_before_lockout: None,
+        }
+    }
+}
+
+/// Whop payments: paid tiers are bought through Whop checkout, and Whop's
+/// webhooks (POST /api/webhooks/whop) set the paid tier.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(default)]
+pub struct WhopConfig {
+    pub enabled: bool,
+    pub api_url: String,
+    /// Company API key. Needs member:basic:read, member:email:read,
+    /// checkout_configuration:create and webhook_receive:memberships.
+    pub api_key: String,
+    /// Your Whop company/account id, `biz_…`.
+    pub account_id: String,
+    /// The webhook's signing secret exactly as Whop shows it, `ws_…`.
+    pub webhook_secret: String,
+    /// Paid access lasts until the billing period ends plus this many days,
+    /// so a late renewal never cuts anyone off.
+    pub grace_days: i64,
+}
+
+impl Default for WhopConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            api_url: "https://api.whop.com/api/v1".to_owned(),
+            api_key: String::new(),
+            account_id: String::new(),
+            webhook_secret: String::new(),
+            grace_days: 3,
         }
     }
 }
@@ -575,6 +667,7 @@ tiers:
       remote_bitrate_limit_mbps: 8
       transcoding: true
       downloads: false
+      live_tv: false
     seerr:
       movie_quota: { limit: 2, days: 7 }
       permissions: [REQUEST]
@@ -598,6 +691,7 @@ tiers:
         let free = config.tier("free").expect("free tier");
         assert_eq!(free.jellyfin.as_ref().unwrap().max_active_sessions, Some(1));
         assert_eq!(free.jellyfin.as_ref().unwrap().libraries, None);
+        assert_eq!(free.jellyfin.as_ref().unwrap().live_tv, Some(false));
         let quota = free.seerr.as_ref().unwrap().movie_quota.unwrap();
         assert_eq!((quota.limit, quota.days), (2, 7));
         let plus = config.tier("plus").expect("plus tier");
@@ -626,6 +720,7 @@ tiers:
             description: String::new(),
             price_label: None,
             lldap_groups: Vec::new(),
+            whop_plan_ids: Vec::new(),
             jellyfin: None,
             seerr: None,
         };
@@ -650,6 +745,24 @@ tiers:
         seerr_alone.seerr.url = "http://seerr".to_owned();
         seerr_alone.seerr.api_key = "key".to_owned();
         check(seerr_alone, "needs jellyfin");
+
+        let mut whop_incomplete = AppConfig::default();
+        whop_incomplete.whop.enabled = true;
+        whop_incomplete.whop.api_key = "key".to_owned();
+        check(whop_incomplete, "whop.account_id is empty");
+
+        let mut shared_plan = tier("plus");
+        shared_plan.whop_plan_ids = vec!["plan_1".to_owned()];
+        let mut also_shared = tier("premium");
+        also_shared.whop_plan_ids = vec!["plan_1".to_owned()];
+        check(
+            AppConfig { tiers: vec![tier("free"), shared_plan, also_shared], ..AppConfig::default() },
+            "listed under both",
+        );
+
+        let mut bad_lockout = AppConfig::default();
+        bad_lockout.jellyfin.login_attempts_before_lockout = Some(-2);
+        check(bad_lockout, "login_attempts_before_lockout");
 
         let mut no_scheme = AppConfig::default();
         no_scheme.jellyfin.enabled = true;

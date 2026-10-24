@@ -75,6 +75,10 @@ jellyfin:
   # LLDAP password (needs the LDAP plugin). Check GET /Auth/Providers if unsure.
   auth_provider_id: Jellyfin.Plugin.LDAP_Auth.LdapAuthenticationProviderPlugin
   password_reset_provider_id: Jellyfin.Plugin.LDAP_Auth.LdapAuthenticationProviderPlugin
+  # Failed logins before Jellyfin locks an account (every managed account):
+  # -1 never, 0 = Jellyfin's default (3). A locked account stays disabled until
+  # an admin re-enables it in Jellyfin. Leave out to keep each account's setting.
+  login_attempts_before_lockout: 5
 
 seerr:
   enabled: true
@@ -84,10 +88,27 @@ seerr:
   # Settings -> General -> API Key. Prefer APP__SEERR__API_KEY.
   api_key: change-me
 
+# --- Payments (Whop) -----------------------------------------------------------
+# Paid tiers are bought through Whop checkout; Whop's membership webhooks set
+# the paid tier. In Whop's developer settings, create a webhook pointing at
+# https://<this host>/api/webhooks/whop with the membership events, and an API
+# key with member:basic:read, member:email:read and checkout configuration
+# permissions. That path must be reachable without logging in (no Authelia).
+whop:
+  enabled: true
+  api_url: https://sandbox-api.whop.com/api/v1
+  api_key: change-me            # prefer APP__WHOP__API_KEY
+  account_id: biz_change-me     # your Whop company id
+  webhook_secret: ws_change-me  # exactly as Whop shows it; prefer APP__WHOP__WEBHOOK_SECRET
+  # Paid access lasts until the billing period ends plus this many days.
+  grace_days: 3
+
 # --- Tiers ---------------------------------------------------------------------
-# Everyone is on default_tier unless an admin sets another on /admin/users
-# (and, later, a Whop payment). Group membership is managed only for groups
-# listed under some tier; other groups are left alone.
+# Everyone is on default_tier unless they pay for another through Whop or an
+# admin sets one on /admin/users (an admin's choice wins over a payment).
+# Tiers are listed lowest to highest; with several paid memberships the
+# highest wins. Group membership is managed only for groups listed under some
+# tier; other groups are left alone.
 
 default_tier: free
 
@@ -101,6 +122,7 @@ tiers:
       remote_bitrate_limit_mbps: 8 # 0 = unlimited
       transcoding: false
       downloads: false
+      live_tv: false # Jellyfin enables Live TV by default; switch it off where it isn't included
       # libraries: [Movies, Shows]  # leave out for all libraries
     seerr:
       movie_quota: { limit: 1, days: 7 } # leave out to use Seerr's global default
@@ -112,11 +134,14 @@ tiers:
     description: Three streams, higher quality, transcoding and more requests.
     price_label: "$5/month"
     lldap_groups: [user, jelly, plus]
+    # Whop plans that grant this tier; the first is used for the buy button.
+    whop_plan_ids: [plan_change-me-plus]
     jellyfin:
       max_active_sessions: 3
       remote_bitrate_limit_mbps: 15
       transcoding: true
       downloads: false
+      live_tv: false
     seerr:
       movie_quota: { limit: 3, days: 7 }
       tv_quota: { limit: 3, days: 14 }
@@ -127,11 +152,13 @@ tiers:
     description: Five streams, up to high end 1080p quality streaming, downloads and more requests.
     price_label: "$15/month"
     lldap_groups: [user, jelly, premium]
+    whop_plan_ids: [plan_change-me-premium]
     jellyfin:
       max_active_sessions: 5
       remote_bitrate_limit_mbps: 25
       transcoding: true
       downloads: true
+      live_tv: false
     seerr:
       movie_quota: { limit: 5, days: 7 }
       tv_quota: { limit: 4, days: 14 }
@@ -142,11 +169,13 @@ tiers:
     description: Unlimited streams, Up to 4k quality streaming, downloads, auto approved requests and live TV(Once available).
     price_label: "$20/month"
     lldap_groups: [user, jelly, premiumplus]
+    whop_plan_ids: [plan_change-me-premiumplus]
     jellyfin:
       max_active_sessions: 0
       remote_bitrate_limit_mbps: 75
       transcoding: true
       downloads: true
+      live_tv: true
     seerr:
       movie_quota: { limit: 5, days: 7 }
       tv_quota: { limit: 4, days: 14 }

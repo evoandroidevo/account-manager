@@ -8,6 +8,9 @@
 invites:
   default_groups: [user, jelly]
 
+jellyfin:
+  login_attempts_before_lockout: 5
+
 default_tier: free
 
 tiers:
@@ -20,6 +23,7 @@ tiers:
       remote_bitrate_limit_mbps: 8
       transcoding: true
       downloads: false
+      live_tv: false
     seerr:
       movie_quota: { limit: 2, days: 7 }
       tv_quota: { limit: 1, days: 7 }
@@ -27,14 +31,34 @@ tiers:
   - id: plus
     name: Plus
     description: The bigger plan.
+    price_label: "$5/month"
     lldap_groups: [user, jelly, plus]
+    # Bought through the mock Whop (end2end/mock-whop.mjs).
+    whop_plan_ids: [plan_plus]
     jellyfin:
       max_active_sessions: 3
       remote_bitrate_limit_mbps: 0
       transcoding: true
       downloads: true
+      live_tv: true
       libraries: [Movies]
     seerr:
       movie_quota: { limit: 10, days: 7 }
       tv_quota: { limit: 5, days: 7 }
+      permissions: [REQUEST, AUTO_APPROVE]
+  - id: premium
+    name: Premium
+    description: The biggest plan.
+    price_label: "$15/month"
+    lldap_groups: [user, jelly, premium]
+    whop_plan_ids: [plan_premium]
+    jellyfin:
+      max_active_sessions: 5
+      remote_bitrate_limit_mbps: 0
+      transcoding: true
+      downloads: true
+      live_tv: true
+    seerr:
+      movie_quota: { limit: 20, days: 7 }
+      tv_quota: { limit: 10, days: 7 }
       permissions: [REQUEST, AUTO_APPROVE]

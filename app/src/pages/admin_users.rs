@@ -121,7 +121,7 @@ fn UserRows(
     let plan_detail = match (source.as_str(), &valid_until) {
         ("manual", Some(until)) => format!("set by admin, ends {until}"),
         ("manual", None) => "set by admin".to_owned(),
-        ("whop", Some(until)) => format!("paid, renews {until}"),
+        ("whop", Some(until)) => format!("paid, active until {until}"),
         ("whop", None) => "paid".to_owned(),
         _ => "standard".to_owned(),
     };

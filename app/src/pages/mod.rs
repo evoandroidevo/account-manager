@@ -1,6 +1,8 @@
 pub mod account;
 pub mod admin_invites;
+pub mod admin_payments;
 pub mod admin_users;
+pub mod billing;
 pub mod confirm_email;
 pub mod email;
 pub mod invite;

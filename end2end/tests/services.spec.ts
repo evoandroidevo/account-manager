@@ -59,6 +59,10 @@ test("new accounts are created in Jellyfin and Seerr on the default plan", async
     EnableVideoPlaybackTranscoding: true,
     EnableContentDownloading: false,
     EnableAllFolders: true,
+    // Free has no Live TV; nobody manages recordings; global lockout applies.
+    EnableLiveTvAccess: false,
+    EnableLiveTvManagement: false,
+    LoginAttemptsBeforeLockout: 5,
     AuthenticationProviderId: "Jellyfin.Plugin.LDAP_Auth.LdapAuthenticationProviderPlugin",
   });
 
@@ -94,6 +98,9 @@ test("changing the plan updates the Jellyfin policy and Seerr limits", async ({ 
       EnableContentDownloading: true,
       EnableAllFolders: false,
       EnabledFolders: [movies],
+      EnableLiveTvAccess: true,
+      EnableLiveTvManagement: false,
+      LoginAttemptsBeforeLockout: 5,
     });
   await expect
     .poll(async () => (await seerrUser(user.username, jellyfin.Id)).permissions, SYNC)
@@ -103,7 +110,12 @@ test("changing the plan updates the Jellyfin policy and Seerr limits", async ({ 
   await setPlan(page, user.username, null);
   await expect
     .poll(async () => (await jellyfinUser(user.username)).Policy, SYNC)
-    .toMatchObject({ MaxActiveSessions: 1, EnableContentDownloading: false, EnableAllFolders: true });
+    .toMatchObject({
+      MaxActiveSessions: 1,
+      EnableContentDownloading: false,
+      EnableAllFolders: true,
+      EnableLiveTvAccess: false,
+    });
   await expect
     .poll(async () => (await seerrUser(user.username, jellyfin.Id)).permissions, SYNC)
     .toBe(REQUEST);

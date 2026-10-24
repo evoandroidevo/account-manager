@@ -1,4 +1,5 @@
 import { expect, test, type Browser, type Page } from "@playwright/test";
+import { createHmac } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
 
@@ -211,4 +212,49 @@ export async function jellyfinLogin(username: string, password: string): Promise
     body: JSON.stringify({ Username: username, Pw: password }),
   });
   return response.status;
+}
+
+// --- Mock Whop (end2end/mock-whop.mjs) ------------------------------------------
+
+
+export const MOCK_WHOP_URL = "http://127.0.0.1:3011";
+// Same values as in playwright.config.ts.
+export const WHOP_WEBHOOK_SECRET = "ws_test_secret";
+
+/** Calls one of the mock Whop's test-control endpoints. */
+export async function mockWhop(apiPath: string, body: object = {}) {
+  const response = await fetch(`${MOCK_WHOP_URL}${apiPath}`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) throw new Error(`mock Whop ${apiPath}: ${response.status} ${await response.text()}`);
+  return response.json();
+}
+
+export async function mockWhopGet(apiPath: string) {
+  const response = await fetch(`${MOCK_WHOP_URL}${apiPath}`);
+  if (!response.ok) throw new Error(`mock Whop ${apiPath}: ${response.status} ${await response.text()}`);
+  return response.json();
+}
+
+/** Builds the headers and body of a Whop webhook, signed like Whop does. */
+export function signedWebhook(
+  event: { id: string; type: string; data: object },
+  secret = WHOP_WEBHOOK_SECRET,
+) {
+  const body = JSON.stringify(event);
+  const timestamp = Math.floor(Date.now() / 1000).toString();
+  const signature = createHmac("sha256", Buffer.from(secret, "utf8"))
+    .update(`${event.id}.${timestamp}.${body}`)
+    .digest("base64");
+  return {
+    headers: {
+      "content-type": "application/json",
+      "webhook-id": event.id,
+      "webhook-timestamp": timestamp,
+      "webhook-signature": `v1,${signature}`,
+    },
+    data: body,
+  };
 }

@@ -10,6 +10,11 @@ pub const STATE_ERROR: &str = "error";
 /// Deliberately not managed (e.g. a Jellyfin administrator).
 pub const STATE_SKIPPED: &str = "skipped";
 
+/// Someone is waiting for this sync (signup, a plan change, a payment).
+pub const PRIORITY_NOW: i64 = 0;
+/// A background re-sync from the periodic reconcile.
+pub const PRIORITY_BACKGROUND: i64 = 1;
+
 #[derive(Clone, Debug)]
 pub struct ProvisioningRepository {
     pool: SqlitePool,
@@ -33,61 +38,83 @@ pub struct SyncJob {
     pub attempts: i64,
     pub run_after: String,
     pub last_error: Option<String>,
+    pub priority: i64,
 }
 
 const ACCOUNT_COLUMNS: &str = "user_id, service, remote_id, applied_tier, state, detail, updated_at";
-const JOB_COLUMNS: &str = "user_id, service, attempts, run_after, last_error";
+const JOB_COLUMNS: &str = "user_id, service, attempts, run_after, last_error, priority";
 
 impl ProvisioningRepository {
     pub fn new(pool: SqlitePool) -> Self {
         Self { pool }
     }
 
-    /// Queues a sync to run at `run_after`. An existing job for the same
-    /// user and service is reset (attempts cleared, rescheduled) rather than
-    /// duplicated, and the account is shown as pending.
+    /// Queues a sync someone is waiting for, to run at `run_after`. An
+    /// existing job for the same user and service is reset (attempts cleared,
+    /// rescheduled, promoted) rather than duplicated, and the account is
+    /// shown as pending.
     pub async fn enqueue(
         &self,
         user_id: &str,
         service: &str,
         run_after: &str,
     ) -> Result<(), sqlx::Error> {
+        self.enqueue_many(&[(user_id.to_owned(), service.to_owned())], run_after, PRIORITY_NOW)
+            .await
+    }
+
+    /// Like `enqueue`, for many (user id, service) pairs in one transaction,
+    /// so a reconcile over every account commits once instead of per job.
+    /// A job keeps the more urgent of its old and new priority.
+    pub async fn enqueue_many(
+        &self,
+        jobs: &[(String, String)],
+        run_after: &str,
+        priority: i64,
+    ) -> Result<(), sqlx::Error> {
+        if jobs.is_empty() {
+            return Ok(());
+        }
         let now = now_rfc3339();
         let mut transaction = self.pool.begin().await?;
-        sqlx::query(
-            "INSERT INTO sync_jobs (user_id, service, attempts, run_after, created_at)
-             VALUES (?, ?, 0, ?, ?)
-             ON CONFLICT (user_id, service) DO UPDATE SET
-                attempts = 0,
-                run_after = excluded.run_after,
-                last_error = NULL",
-        )
-        .bind(user_id)
-        .bind(service)
-        .bind(run_after)
-        .bind(&now)
-        .execute(&mut *transaction)
-        .await?;
-        sqlx::query(
-            "INSERT INTO service_accounts (user_id, service, state, updated_at)
-             VALUES (?, ?, ?, ?)
-             ON CONFLICT (user_id, service) DO UPDATE SET
-                state = excluded.state,
-                detail = NULL,
-                updated_at = excluded.updated_at",
-        )
-        .bind(user_id)
-        .bind(service)
-        .bind(STATE_PENDING)
-        .bind(&now)
-        .execute(&mut *transaction)
-        .await?;
+        for (user_id, service) in jobs {
+            sqlx::query(
+                "INSERT INTO sync_jobs (user_id, service, attempts, run_after, created_at, priority)
+                 VALUES (?, ?, 0, ?, ?, ?)
+                 ON CONFLICT (user_id, service) DO UPDATE SET
+                    attempts = 0,
+                    run_after = excluded.run_after,
+                    last_error = NULL,
+                    priority = MIN(sync_jobs.priority, excluded.priority)",
+            )
+            .bind(user_id)
+            .bind(service)
+            .bind(run_after)
+            .bind(&now)
+            .bind(priority)
+            .execute(&mut *transaction)
+            .await?;
+            sqlx::query(
+                "INSERT INTO service_accounts (user_id, service, state, updated_at)
+                 VALUES (?, ?, ?, ?)
+                 ON CONFLICT (user_id, service) DO UPDATE SET
+                    state = excluded.state,
+                    detail = NULL,
+                    updated_at = excluded.updated_at",
+            )
+            .bind(user_id)
+            .bind(service)
+            .bind(STATE_PENDING)
+            .bind(&now)
+            .execute(&mut *transaction)
+            .await?;
+        }
         transaction.commit().await
     }
 
     pub async fn due_jobs(&self, now: &str, limit: i64) -> Result<Vec<SyncJob>, sqlx::Error> {
         sqlx::query_as::<_, SyncJob>(&format!(
-            "SELECT {JOB_COLUMNS} FROM sync_jobs WHERE run_after <= ? ORDER BY run_after LIMIT ?"
+            "SELECT {JOB_COLUMNS} FROM sync_jobs WHERE run_after <= ? ORDER BY priority, run_after LIMIT ?"
         ))
         .bind(now)
         .bind(limit)
@@ -240,6 +267,55 @@ mod tests {
         assert!(jobs[0].last_error.is_none());
         let account = repo.account(&user_id, "jellyfin").await.unwrap().unwrap();
         assert_eq!(account.state, STATE_PENDING);
+    }
+
+    #[tokio::test]
+    async fn enqueue_many_queues_every_pair_once() {
+        let (repo, user_id) = setup().await;
+        let jobs = vec![
+            (user_id.clone(), "lldap".to_owned()),
+            (user_id.clone(), "jellyfin".to_owned()),
+        ];
+        repo.enqueue_many(&jobs, "2026-01-01T00:00:00+00:00", super::PRIORITY_BACKGROUND).await.unwrap();
+        repo.enqueue_many(&jobs, "2026-01-01T00:00:05+00:00", super::PRIORITY_BACKGROUND).await.unwrap();
+
+        let queued = repo.jobs().await.unwrap();
+        assert_eq!(queued.len(), 2);
+        assert!(queued.iter().all(|job| job.run_after == "2026-01-01T00:00:05+00:00"));
+        assert!(repo.accounts_for_user(&user_id).await.unwrap().iter().all(|a| a.state == STATE_PENDING));
+        repo.enqueue_many(&[], "2026-01-01T00:00:00+00:00", super::PRIORITY_NOW).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn waiting_users_jump_the_background_queue() {
+        let (repo, user_id) = setup().await;
+        let other = crate::repo::users::UserRepository::new(repo.pool.clone())
+            .ensure("bob")
+            .await
+            .unwrap();
+        // A big background re-sync was queued first...
+        repo.enqueue_many(
+            &[(other.id.clone(), "jellyfin".to_owned()), (other.id.clone(), "seerr".to_owned())],
+            "2026-01-01T00:00:00+00:00",
+            super::PRIORITY_BACKGROUND,
+        )
+        .await
+        .unwrap();
+        // ...then someone pays and is waiting.
+        repo.enqueue(&user_id, "jellyfin", "2026-01-01T00:00:10+00:00").await.unwrap();
+
+        let due = repo.due_jobs("2026-01-01T00:01:00+00:00", 10).await.unwrap();
+        assert_eq!(due[0].user_id, user_id, "the waiting user's job runs first");
+        assert_eq!(due.len(), 3);
+
+        // A user action on a queued background job promotes it; a later
+        // background pass doesn't demote it again.
+        repo.enqueue(&other.id, "seerr", "2026-01-01T00:00:20+00:00").await.unwrap();
+        repo.enqueue_many(&[(other.id.clone(), "seerr".to_owned())], "2026-01-01T00:00:30+00:00", super::PRIORITY_BACKGROUND)
+            .await
+            .unwrap();
+        let seerr = repo.jobs().await.unwrap().into_iter().find(|job| job.service == "seerr").unwrap();
+        assert_eq!(seerr.priority, super::PRIORITY_NOW);
     }
 
     #[tokio::test]

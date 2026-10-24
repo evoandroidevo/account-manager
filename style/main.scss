@@ -307,6 +307,12 @@ button.danger {
 	color: var(--error);
 }
 
+button.secondary {
+	background: transparent;
+	color: var(--accent);
+	border: 1px solid var(--accent);
+}
+
 @media (max-width: 30rem) {
 	.row {
 		grid-template-columns: 1fr;
@@ -424,4 +430,85 @@ select {
 	border-radius: 6px;
 	background: var(--bg);
 	color: var(--text);
+}
+
+.notice {
+	margin: 0 0 1rem;
+	padding: 0.75rem 1rem;
+	border: 1px solid var(--success);
+	border-radius: 8px;
+	color: var(--success);
+
+	p {
+		margin: 0 0 0.5rem;
+	}
+}
+
+.tiers {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+	gap: 1rem;
+
+	.tier {
+		display: flex;
+		flex-direction: column;
+		gap: 0.5rem;
+		align-items: flex-start;
+		margin: 0;
+
+		&.current {
+			border-color: var(--accent);
+		}
+
+		.price {
+			margin: 0;
+			font-size: 1.15rem;
+			font-weight: 700;
+		}
+
+		p {
+			margin: 0;
+		}
+
+		.quote {
+			margin-top: auto;
+			font-size: 0.9rem;
+		}
+
+		button,
+		.status {
+			margin-top: auto;
+		}
+
+		.quote + button {
+			margin-top: 0;
+		}
+	}
+}
+
+.inline-form {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.5rem;
+
+	input {
+		min-width: 8rem;
+	}
+}
+
+.status {
+	&.status-applied {
+		color: var(--success);
+		border-color: var(--success);
+	}
+
+	&.status-unmatched {
+		color: var(--error);
+		border-color: var(--error);
+	}
+
+	&.status-ignored,
+	&.status-received {
+		color: var(--muted);
+	}
 }

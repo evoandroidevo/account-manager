@@ -3,7 +3,8 @@
 //! Jobs live in `sync_jobs`, so nothing is lost on restart and requests never
 //! wait on Jellyfin or Seerr. Failed jobs retry with exponential backoff. A
 //! periodic reconcile queues jobs for accounts that are missing or whose
-//! applied tier no longer matches (e.g. a manual tier expired).
+//! applied settings no longer match: a different tier (e.g. a manual tier
+//! expired) or a changed tier configuration.
 
 use std::{
     collections::{HashMap, HashSet},
@@ -11,13 +12,17 @@ use std::{
 };
 
 use chrono::Utc;
+use sha2::{Digest, Sha256};
 
 use crate::{
     AppState,
     accounts::now_rfc3339,
+    config::{AppConfig, TierConfig},
     repo::{
         entitlements::Entitlement,
-        provisioning::{STATE_OK, STATE_SKIPPED, ServiceAccount, SyncJob},
+        provisioning::{
+            PRIORITY_BACKGROUND, PRIORITY_NOW, STATE_OK, STATE_SKIPPED, ServiceAccount, SyncJob,
+        },
     },
     services::{Service, SyncOutcome},
     tiers::{self, EffectiveTier},
@@ -25,14 +30,27 @@ use crate::{
 
 const POLL_INTERVAL: Duration = Duration::from_secs(5);
 const RECONCILE_INTERVAL: Duration = Duration::from_secs(10 * 60);
+const WHOP_RECONCILE_INTERVAL: Duration = Duration::from_secs(24 * 60 * 60);
 const BATCH_SIZE: i64 = 50;
 
 pub fn spawn(state: AppState) {
     tokio::spawn(async move {
         let mut poll = tokio::time::interval(POLL_INTERVAL);
         let mut last_reconcile: Option<tokio::time::Instant> = None;
+        let mut last_whop_reconcile: Option<tokio::time::Instant> = None;
         loop {
             poll.tick().await;
+            // Daily (and at startup): re-apply every Whop membership, in case
+            // a webhook was missed.
+            if state.whop_client.is_some()
+                && last_whop_reconcile.is_none_or(|at| at.elapsed() >= WHOP_RECONCILE_INTERVAL)
+            {
+                match crate::whop::reconcile(&state).await {
+                    Ok(count) => log::info!("Whop reconcile applied {count} memberships"),
+                    Err(error) => log::error!("Whop reconcile failed: {error}"),
+                }
+                last_whop_reconcile = Some(tokio::time::Instant::now());
+            }
             if last_reconcile.is_none_or(|at| at.elapsed() >= RECONCILE_INTERVAL) {
                 match reconcile(&state).await {
                     Ok(0) => {}
@@ -153,7 +171,7 @@ async fn sync_one(
             client.sync(&user.username, &jellyfin_id, tier.seerr.as_ref()).await?
         }
     };
-    Ok((outcome, Some(tier.id.clone())))
+    Ok((outcome, Some(settings_key(&state.config, tier, service))))
 }
 
 /// Puts the user in their tier's groups and takes them out of groups that
@@ -192,12 +210,30 @@ async fn sync_groups(
     Ok(SyncOutcome::done(None))
 }
 
+/// Identifies what a sync of `service` applies for `tier`: the tier id plus a
+/// short hash of the settings involved. Stored as the account's applied
+/// tier, so editing a tier's settings (not only switching tiers) marks its
+/// accounts out of date and the reconcile re-applies them.
+pub fn settings_key(config: &AppConfig, tier: &TierConfig, service: Service) -> String {
+    let settings = match service {
+        Service::Lldap => format!("{:?}|{:?}", tier.lldap_groups, config.tier_managed_groups()),
+        Service::Jellyfin => format!(
+            "{:?}|{:?}",
+            tier.jellyfin, config.jellyfin.login_attempts_before_lockout
+        ),
+        Service::Seerr => format!("{:?}", tier.seerr),
+    };
+    let digest = format!("{:x}", Sha256::digest(settings.as_bytes()));
+    format!("{}#{}", tier.id, &digest[..12])
+}
+
 /// Which services need a sync for this user: no account record yet, or one
-/// whose applied tier differs from the effective tier. Services with a queued
-/// job are left to that job.
+/// whose applied settings differ from what `tier` would apply now. Services
+/// with a queued job are left to that job.
 pub fn needs_sync(
+    config: &AppConfig,
+    tier: &TierConfig,
     enabled: &[Service],
-    effective_tier: &str,
     accounts: &[&ServiceAccount],
     queued: &HashSet<&str>,
 ) -> Vec<Service> {
@@ -210,7 +246,8 @@ pub fn needs_sync(
                 None => true,
                 Some(account) => {
                     (account.state == STATE_OK || account.state == STATE_SKIPPED)
-                        && account.applied_tier.as_deref() != Some(effective_tier)
+                        && account.applied_tier.as_deref()
+                            != Some(settings_key(config, tier, *service).as_str())
                 }
             }
         })
@@ -235,16 +272,23 @@ pub async fn reconcile_user(state: &AppState, user_id: &str) -> Result<usize, St
         .map(|job| job.service.as_str())
         .collect();
     let accounts: Vec<&ServiceAccount> = accounts.iter().collect();
-    let due = needs_sync(&state.services.enabled(), &effective.tier.id, &accounts, &queued);
-    let now = now_rfc3339();
-    for service in &due {
-        state
-            .provisioning
-            .enqueue(user_id, service.as_str(), &now)
-            .await
-            .map_err(|error| error.to_string())?;
-    }
-    Ok(due.len())
+    let due = needs_sync(
+        &state.config,
+        &effective.tier,
+        &state.services.enabled(),
+        &accounts,
+        &queued,
+    );
+    let jobs: Vec<(String, String)> = due
+        .iter()
+        .map(|service| (user_id.to_owned(), service.as_str().to_owned()))
+        .collect();
+    state
+        .provisioning
+        .enqueue_many(&jobs, &now_rfc3339(), PRIORITY_NOW)
+        .await
+        .map_err(|error| error.to_string())?;
+    Ok(jobs.len())
 }
 
 /// Queues jobs for every user whose accounts are missing or out of date.
@@ -263,7 +307,7 @@ pub async fn reconcile(state: &AppState) -> Result<usize, String> {
     }
     let enabled = state.services.enabled();
     let now = now_rfc3339();
-    let mut queued = 0;
+    let mut due: Vec<(String, String)> = Vec::new();
     for user in users.iter().filter(|user| user.disabled_at.is_none()) {
         let effective = tiers::resolve(
             &state.config,
@@ -277,24 +321,29 @@ pub async fn reconcile(state: &AppState) -> Result<usize, String> {
             .filter(|job| job.user_id == user.id)
             .map(|job| job.service.as_str())
             .collect();
-        for service in needs_sync(&enabled, &effective.tier.id, &user_accounts, &user_jobs) {
-            state
-                .provisioning
-                .enqueue(&user.id, service.as_str(), &now)
-                .await
-                .map_err(|error| error.to_string())?;
-            queued += 1;
+        for service in needs_sync(&state.config, &effective.tier, &enabled, &user_accounts, &user_jobs) {
+            due.push((user.id.clone(), service.as_str().to_owned()));
         }
     }
-    Ok(queued)
+    // One transaction for the whole pass.
+    state
+        .provisioning
+        .enqueue_many(&due, &now, PRIORITY_BACKGROUND)
+        .await
+        .map_err(|error| error.to_string())?;
+    Ok(due.len())
 }
 
 #[cfg(test)]
 mod tests {
     use std::{collections::HashSet, time::Duration};
 
-    use super::{backoff, needs_sync};
-    use crate::{repo::provisioning::ServiceAccount, services::Service};
+    use super::{backoff, needs_sync, settings_key};
+    use crate::{
+        config::{AppConfig, JellyfinTier},
+        repo::provisioning::ServiceAccount,
+        services::Service,
+    };
 
     fn account(service: &str, state: &str, applied: Option<&str>) -> ServiceAccount {
         ServiceAccount {
@@ -318,22 +367,46 @@ mod tests {
 
     #[test]
     fn syncs_missing_and_out_of_date_accounts_only() {
+        let config = AppConfig::default();
+        let tier = config.tiers[0].clone();
         let enabled = [Service::Lldap, Service::Jellyfin, Service::Seerr];
-        let lldap = account("lldap", "ok", Some("plus"));
-        let jellyfin = account("jellyfin", "skipped", Some("free"));
+        let current = settings_key(&config, &tier, Service::Lldap);
+        let lldap = account("lldap", "ok", Some(&current));
+        let jellyfin = account("jellyfin", "skipped", Some("other-tier#000000000000"));
         let none_queued = HashSet::new();
 
         // lldap is current, jellyfin is behind, seerr has no record yet.
-        let due = needs_sync(&enabled, "plus", &[&lldap, &jellyfin], &none_queued);
+        let due = needs_sync(&config, &tier, &enabled, &[&lldap, &jellyfin], &none_queued);
         assert_eq!(due, vec![Service::Jellyfin, Service::Seerr]);
 
         // Already-queued services are left to their job.
         let queued: HashSet<&str> = ["seerr"].into();
-        let due = needs_sync(&enabled, "plus", &[&lldap, &jellyfin], &queued);
+        let due = needs_sync(&config, &tier, &enabled, &[&lldap, &jellyfin], &queued);
         assert_eq!(due, vec![Service::Jellyfin]);
 
         // Pending and errored accounts are handled by their job's retries.
         let pending = account("lldap", "pending", None);
-        assert!(needs_sync(&[Service::Lldap], "plus", &[&pending], &none_queued).is_empty());
+        assert!(needs_sync(&config, &tier, &[Service::Lldap], &[&pending], &none_queued).is_empty());
+    }
+
+    #[test]
+    fn editing_a_tier_or_shared_setting_changes_its_key() {
+        let mut config = AppConfig::default();
+        let mut tier = config.tiers[0].clone();
+        let before = settings_key(&config, &tier, Service::Jellyfin);
+        assert!(before.starts_with("free#"));
+        assert_eq!(before, settings_key(&config, &tier, Service::Jellyfin), "stable");
+
+        tier.jellyfin = Some(JellyfinTier { live_tv: Some(false), ..JellyfinTier::default() });
+        let edited = settings_key(&config, &tier, Service::Jellyfin);
+        assert_ne!(before, edited);
+
+        config.jellyfin.login_attempts_before_lockout = Some(5);
+        assert_ne!(edited, settings_key(&config, &tier, Service::Jellyfin));
+        // Seerr's key ignores Jellyfin settings.
+        assert_eq!(
+            settings_key(&AppConfig::default(), &tier, Service::Seerr),
+            settings_key(&config, &tier, Service::Seerr)
+        );
     }
 }

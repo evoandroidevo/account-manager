@@ -21,7 +21,7 @@ Every key can be overridden as `APP__SECTION__KEY`, e.g. `APP__LDAP__PASSWORD`.
 ## Tiers and provisioning
 
 Each account is on one tier (`tiers` in the config): an admin override from
-`/admin/users`, otherwise `default_tier` (Whop payments come in phase 4). A
+`/admin/users`, else a paid Whop membership, else `default_tier`. A
 background worker applies the tier to every enabled service, in order:
 
 1. **LLDAP groups**: adds the tier's `lldap_groups` and removes groups that
@@ -36,6 +36,41 @@ first sync, replacing anything set by hand for the fields a tier defines.
 Jobs retry with backoff; a reconcile every 10 minutes catches expired plans and
 anything missed. Users are queued on signup and on login.
 
+## Payments (Whop)
+
+`/billing` lists the tiers; a tier with `whop_plan_ids` gets a buy button that
+creates a Whop checkout carrying the user's id as metadata and sends the
+browser there. Whop then calls `POST /api/webhooks/whop`:
+
+- The signature is checked against the raw body (Standard Webhooks headers,
+  HMAC-SHA256 keyed with the literal `ws_…` secret, 5-minute window), and each
+  delivery id is processed once.
+- `membership.*` events are matched to an account by the checkout metadata,
+  then a known membership, then the account with the same email. The user's
+  best active membership sets their paid tier until the billing period ends
+  plus `grace_days`; cancelled or expired memberships remove it.
+- Memberships that match nobody (bought on Whop directly with another email)
+  wait on `/admin/payments` until an admin assigns them.
+
+Changing plans (`backend/src/plan_change.rs`); Whop can't move a membership
+to another plan, so:
+
+- **Upgrades** are a new checkout whose first payment is reduced by the unused
+  part of the current period (old renewal price × time left, capped at the new
+  first payment, skipped below $0.50 or while trialing). The credit is a
+  single-use promo code limited to the new plan, applied with `?promoCode=` on
+  the checkout link. Once the new membership is active the old one is
+  cancelled immediately. The API key needs the promo code and membership
+  management permissions.
+- **Downgrades** (including to the free tier) are scheduled: the current
+  membership stops renewing and runs to the end of its period, and the page
+  offers "Keep <plan>" until then. After it ends, a paid target is offered as
+  "Continue with <plan>".
+
+A reconcile at startup and daily re-applies every membership Whop reports,
+in case a webhook was missed. In production the webhook path must bypass
+Authelia; the signature is its authentication.
+
 ## Pages
 
 | Route | Who | |
@@ -43,11 +78,13 @@ anything missed. Users are queued on signup and on login.
 | `/login` | anyone | LLDAP username and password |
 | `/invite?code=…` | anyone with an invite | create an account; logs straight in |
 | `/` | user | profile, plan and service status |
+| `/billing` | user | compare plans, buy one through Whop, manage the subscription |
 | `/security` | user | change password (signs out other devices) |
 | `/email` | user | change email via a link sent to the new address |
 | `/confirm-email?token=…` | link holder | confirm an email change |
 | `/admin/users` | `auth.admin_group` | every user's plan and sync status; set or remove a manual plan, resync |
 | `/admin/invites` | `auth.admin_group` | create, list and revoke invite links |
+| `/admin/payments` | `auth.admin_group` | unmatched Whop memberships (assign to an account) and recent webhooks |
 
 ## Development
 
@@ -92,9 +129,15 @@ npx playwright test
 
 The Playwright config starts `target/debug/server` itself on port 3000 (stop any
 running dev server first). It uses `end2end/e2e-config.yaml` (never `config.yaml`), its own database
-(`data/e2e.db`) and reads emails from `data/e2e-outbox/`. Tests that change a
-password or email sign up fresh accounts, so the seed users never change; each run
-does add a few `e2e…` users to the dev LLDAP, Jellyfin and Seerr.
+(`data/e2e.db`, emptied at the start of each run) and reads emails from
+`data/e2e-outbox/`. Tests that change a password or email sign up fresh accounts,
+so the seed users never change. Those `e2e…` accounts are deleted from the dev
+LLDAP, Jellyfin and Seerr when the run ends (`end2end/cleanup.mjs`, also runnable
+on its own with `node end2end/cleanup.mjs` after an interrupted run).
+
+Payments run against `end2end/mock-whop.mjs`, a stand-in for Whop's API and
+checkout on port 3011 that signs webhooks the way Whop does, so the whole buy,
+upgrade, downgrade, cancel and unmatched-payment flow is tested without a Whop account.
 
 Playwright starts the server through `end2end/start-server.mjs`, which first
 runs `end2end/services.mjs`: it completes the Jellyfin and Seerr setup wizards

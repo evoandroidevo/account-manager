@@ -183,6 +183,26 @@ impl LldapClient {
         self.user_exists("id", username).await
     }
 
+    /// The username of the account with this email, if any.
+    pub async fn username_for_email(&self, email: &str) -> Result<Option<String>, LldapError> {
+        let token = self
+            .login(&self.config.username, &self.config.password)
+            .await?;
+        let query = r#"
+            query LookupUsers($filters: RequestFilter) {
+                users(filters: $filters) { id }
+            }
+        "#;
+        let response: UsernameLookupResponse = self
+            .graphql(
+                &token,
+                query,
+                serde_json::json!({ "filters": { "eq": { "field": "email", "value": email } } }),
+            )
+            .await?;
+        Ok(response.users.into_iter().next().map(|user| user.id))
+    }
+
     pub async fn email_exists(&self, email: &str) -> Result<bool, LldapError> {
         self.user_exists("email", email).await
     }
@@ -621,6 +641,16 @@ struct DeleteUserResponse {
 struct UpdateUserResponse {
     #[serde(rename = "updateUser")]
     update_user: SuccessValue,
+}
+
+#[derive(Deserialize)]
+struct UsernameLookupResponse {
+    users: Vec<UsernameRecord>,
+}
+
+#[derive(Deserialize)]
+struct UsernameRecord {
+    id: String,
 }
 
 #[derive(Deserialize)]
