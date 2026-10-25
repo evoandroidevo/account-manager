@@ -69,7 +69,12 @@ async fn main() {
 
     let conf = get_configuration(None).expect("leptos configuration must load");
     let addr = conf.leptos_options.site_addr;
-    let leptos_options = conf.leptos_options;
+    let mut leptos_options = conf.leptos_options;
+    if std::env::var_os("LEPTOS_SITE_ROOT").is_none() {
+        if let Some(site) = bundled_site_root() {
+            leptos_options.site_root = site.into();
+        }
+    }
     let routes = generate_route_list(App);
 
     let app = Router::new()
@@ -190,6 +195,13 @@ mod tests {
         assert_eq!(origin_of("https://account.example.com/a/b"), "https://account.example.com");
         assert_eq!(origin_of("http://127.0.0.1:3000"), "http://127.0.0.1:3000");
     }
+}
+
+/// Standalone release archives ship the site (wasm, JS, CSS) in `site/`
+/// next to the executable; Leptos would otherwise look in `target/site`.
+fn bundled_site_root() -> Option<String> {
+    let site = std::env::current_exe().ok()?.parent()?.join("site");
+    site.is_dir().then(|| site.to_string_lossy().into_owned())
 }
 
 /// Asks the running server's `/health` on this machine, at the port from
