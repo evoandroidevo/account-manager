@@ -191,7 +191,8 @@ GitHub, or `docker login ghcr.io` on the server with a token that has
 ### Standalone (without Docker)
 
 Each GitHub release has `account-manager-<version>-x86_64-unknown-linux-gnu.tar.gz`
-(glibc 2.35 or newer) and `account-manager-<version>-x86_64-pc-windows-msvc.zip`,
+(glibc 2.35 or newer) and `account-manager-<version>-x86_64-pc-windows-msvc.zip`
+(64-bit Windows 10/11 or Server 2016+, no Visual C++ runtime needed),
 plus `SHA256SUMS`. Each holds the `account-manager` executable, its `site/`
 folder (keep them together), `config.example.yaml`, this README and the licence.
 Running the workflow by hand (Actions → Release → Run workflow) builds the
