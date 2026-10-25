@@ -162,14 +162,16 @@ Authelia; the signature is its authentication.
 ## Deployment
 
 Images are published to `ghcr.io/evoandroidevo/account-manager` by
-`.github/workflows/release.yml`, after the backend tests pass:
+`.github/workflows/docker.yml`, after the backend tests pass:
 
 | Trigger | Tags |
 |---|---|
 | push to `main` | `edge`, `sha-<commit>` |
-| tag `v1.2.3` | `1.2.3`, `1.2`, `latest`, `sha-<commit>`, plus a GitHub release |
+| tag `v1.2.3` | `1.2.3`, `1.2`, `latest`, `sha-<commit>` |
 
 To release, bump `version` in `server/Cargo.toml`, then `git tag v1.2.3 && git push origin v1.2.3`.
+The tag also runs `.github/workflows/release.yml`, which creates the GitHub
+release with standalone archives (see below).
 
 The image (`Dockerfile`, linux/amd64) runs as uid 10001, listens on port 3000,
 reads `/app/config.yaml` and keeps the SQLite database in `/app/data`.
@@ -185,6 +187,28 @@ reachable by Whop (its signature is the authentication; no bot challenge).
 The GHCR package starts private: make it public in the package settings on
 GitHub, or `docker login ghcr.io` on the server with a token that has
 `read:packages`.
+
+### Standalone (without Docker)
+
+Each GitHub release has `account-manager-<version>-x86_64-unknown-linux-gnu.tar.gz`
+(glibc 2.35 or newer) and `account-manager-<version>-x86_64-pc-windows-msvc.zip`,
+plus `SHA256SUMS`. Each holds the `account-manager` executable, its `site/`
+folder (keep them together), `config.example.yaml`, this README and the licence.
+Running the workflow by hand (Actions → Release → Run workflow) builds the
+same archives as workflow artifacts without making a release.
+
+Extract it, copy `config.example.yaml` to `config.yaml` beside the executable,
+and start it from that folder (the config file and `data/` are looked up in the
+current directory):
+
+```sh
+./account-manager                                # Linux
+LEPTOS_SITE_ADDR=0.0.0.0:3000 ./account-manager  # listen on every interface
+```
+
+On Windows run `account-manager.exe` the same way (`$env:LEPTOS_SITE_ADDR="0.0.0.0:3000"`
+in PowerShell). It listens on `127.0.0.1:3000` unless `LEPTOS_SITE_ADDR` says
+otherwise; all other settings are the environment variables above.
 
 ## Development
 
