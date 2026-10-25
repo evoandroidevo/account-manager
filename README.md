@@ -86,6 +86,33 @@ Authelia; the signature is its authentication.
 | `/admin/invites` | `auth.admin_group` | create, list and revoke invite links |
 | `/admin/payments` | `auth.admin_group` | unmatched Whop memberships (assign to an account) and recent webhooks |
 
+## Deployment
+
+Images are published to `ghcr.io/evoandroidevo/account-manager` by
+`.github/workflows/release.yml`, after the backend tests pass:
+
+| Trigger | Tags |
+|---|---|
+| push to `main` | `edge`, `sha-<commit>` |
+| tag `v1.2.3` | `1.2.3`, `1.2`, `latest`, `sha-<commit>`, plus a GitHub release |
+
+To release, bump `version` in `server/Cargo.toml`, then `git tag v1.2.3 && git push origin v1.2.3`.
+
+The image (`Dockerfile`, linux/amd64) runs as uid 10001, listens on port 3000,
+reads `/app/config.yaml` and keeps the SQLite database in `/app/data`.
+`compose.example.yaml` shows a deployment; secrets can stay out of the config
+file as `APP__SECTION__KEY` variables. Its `HEALTHCHECK` runs
+`account-manager healthcheck`, which asks the server's `/health`.
+
+Behind Caddy, set `server.public_url` to the public origin and
+`server.trust_proxy_headers: true`. Don't put the site behind Authelia's
+forward auth (it does its own LLDAP login), and keep `/api/webhooks/whop`
+reachable by Whop (its signature is the authentication; no bot challenge).
+
+The GHCR package starts private: make it public in the package settings on
+GitHub, or `docker login ghcr.io` on the server with a token that has
+`read:packages`.
+
 ## Development
 
 Needs `cargo-leptos` and the `wasm32-unknown-unknown` target
