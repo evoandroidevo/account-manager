@@ -1,0 +1,27 @@
+# Example deployment. Copy next to a filled-in config.yaml (from
+# config.example.yaml) and keep secrets out of it with APP__… variables.
+#
+#   docker compose -f compose.example.yaml up -d
+
+services:
+  account-manager:
+    image: ghcr.io/evoandroidevo/account-manager:latest
+    container_name: account-manager
+    restart: unless-stopped
+    # Caddy proxies account.example.com here; don't publish the port if
+    # Caddy shares the network.
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+      # Owned by uid 10001 (the image's user): sudo chown 10001:10001 data
+      - ./data:/app/data
+    environment:
+      TZ: UTC
+      # Secrets override config.yaml (APP__SECTION__KEY):
+      # APP__LDAP__PASSWORD: ...
+      # APP__JELLYFIN__API_KEY: ...
+      # APP__SEERR__API_KEY: ...
+      # APP__WHOP__API_KEY: ...
+      # APP__WHOP__WEBHOOK_SECRET: ...
+      # APP__MAIL__SMTP__PASSWORD: ...

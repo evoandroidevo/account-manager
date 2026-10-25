@@ -22,6 +22,12 @@ use tower_sessions_sqlx_store::SqliteStore;
 
 #[tokio::main]
 async fn main() {
+    // `account-manager healthcheck`: the container's HEALTHCHECK (the image
+    // has no curl).
+    if std::env::args().nth(1).as_deref() == Some("healthcheck") {
+        std::process::exit(if healthcheck() { 0 } else { 1 });
+    }
+
     simple_logger::SimpleLogger::new()
         .with_level(log::LevelFilter::Info)
         // tower-sessions emits a tracing span per store call; keep those out.
@@ -63,7 +69,12 @@ async fn main() {
 
     let conf = get_configuration(None).expect("leptos configuration must load");
     let addr = conf.leptos_options.site_addr;
-    let leptos_options = conf.leptos_options;
+    let mut leptos_options = conf.leptos_options;
+    if std::env::var_os("LEPTOS_SITE_ROOT").is_none() {
+        if let Some(site) = bundled_site_root() {
+            leptos_options.site_root = site.into();
+        }
+    }
     let routes = generate_route_list(App);
 
     let app = Router::new()
@@ -184,4 +195,36 @@ mod tests {
         assert_eq!(origin_of("https://account.example.com/a/b"), "https://account.example.com");
         assert_eq!(origin_of("http://127.0.0.1:3000"), "http://127.0.0.1:3000");
     }
+}
+
+/// Standalone release archives ship the site (wasm, JS, CSS) in `site/`
+/// next to the executable; Leptos would otherwise look in `target/site`.
+fn bundled_site_root() -> Option<String> {
+    let site = std::env::current_exe().ok()?.parent()?.join("site");
+    site.is_dir().then(|| site.to_string_lossy().into_owned())
+}
+
+/// Asks the running server's `/health` on this machine, at the port from
+/// `LEPTOS_SITE_ADDR`.
+fn healthcheck() -> bool {
+    use std::io::{Read, Write};
+
+    let port = std::env::var("LEPTOS_SITE_ADDR")
+        .ok()
+        .and_then(|addr| addr.parse::<SocketAddr>().ok())
+        .map_or(3000, |addr| addr.port());
+    let addr = SocketAddr::from(([127, 0, 0, 1], port));
+    let Ok(mut stream) = std::net::TcpStream::connect_timeout(&addr, StdDuration::from_secs(3)) else {
+        return false;
+    };
+    let _ = stream.set_read_timeout(Some(StdDuration::from_secs(3)));
+    if stream
+        .write_all(b"GET /health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+        .is_err()
+    {
+        return false;
+    }
+    let mut response = String::new();
+    let _ = stream.read_to_string(&mut response);
+    response.starts_with("HTTP/1.1 200")
 }
