@@ -1,8 +1,8 @@
-name: Release
+name: Docker image
 
 # Tests every push and pull request. Pushes to main publish
-# ghcr.io/<owner>/account-manager:edge; v* tags publish :<version>, :<major>.<minor>
-# and :latest, and create a GitHub release.
+# ghcr.io/<owner>/account-manager:edge; v* tags publish :<version>,
+# :<major>.<minor> and :latest. (release.yml makes the GitHub release.)
 
 on:
   push:
@@ -30,7 +30,7 @@ jobs:
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     permissions:
-      contents: write # the GitHub release on tags
+      contents: read
       packages: write # pushing to ghcr.io
     steps:
       - uses: actions/checkout@v4
@@ -63,9 +63,3 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-
-      - name: GitHub release
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
-        with:
-          generate_release_notes: true
