@@ -502,7 +502,8 @@ select {
 		border-color: var(--success);
 	}
 
-	&.status-unmatched {
+	&.status-unmatched,
+	&.status-unknown_plan {
 		color: var(--error);
 		border-color: var(--error);
 	}

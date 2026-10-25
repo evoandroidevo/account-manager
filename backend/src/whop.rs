@@ -598,6 +598,12 @@ pub async fn handle_webhook(
         match MembershipInfo::from_json(&event["data"]) {
             None => ("error", None, Some("membership data is incomplete".to_owned())),
             Some(info) => match apply_membership(state, &info).await {
+                // Linked, but no tier sells this plan, so nothing changes.
+                Ok(Some(_)) if state.config.tier_for_whop_plan(&info.plan_id).is_none() => {
+                    let detail = format!("plan {} isn't in any tier's whop_plan_ids", info.plan_id);
+                    log::warn!("Whop membership {}: {detail}", info.id);
+                    ("unknown_plan", Some(info.id), Some(detail))
+                }
                 Ok(Some(_)) => ("applied", Some(info.id), None),
                 Ok(None) => ("unmatched", Some(info.id), Some("no account matches this membership".to_owned())),
                 Err(error) => {
