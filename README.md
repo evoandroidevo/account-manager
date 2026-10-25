@@ -173,7 +173,7 @@ To release, bump `version` in `server/Cargo.toml`, then `git tag v1.2.3 && git p
 The tag also runs `.github/workflows/release.yml`, which creates the GitHub
 release with standalone archives (see below).
 
-The image (`Dockerfile`, linux/amd64) runs as uid 10001, listens on port 3000,
+The image (`Dockerfile`, linux/amd64 and linux/arm64, e.g. a Raspberry Pi 4/5 on a 64-bit OS) runs as uid 10001, listens on port 3000,
 reads `/app/config.yaml` and keeps the SQLite database in `/app/data`.
 `compose.example.yaml` shows a deployment; secrets can stay out of the config
 file as `APP__SECTION__KEY` variables. Its `HEALTHCHECK` runs

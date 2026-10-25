@@ -8,8 +8,10 @@ FROM rust:1-trixie AS builder
 
 ARG CARGO_LEPTOS_VERSION=0.3.11
 
+# Built natively for each platform (x86_64 or aarch64), so tools are fetched
+# for the build machine's architecture.
 RUN rustup target add wasm32-unknown-unknown \
-    && curl -fsSL https://github.com/cargo-bins/cargo-binstall/releases/latest/download/cargo-binstall-x86_64-unknown-linux-musl.tgz \
+    && curl -fsSL "https://github.com/cargo-bins/cargo-binstall/releases/latest/download/cargo-binstall-$(uname -m)-unknown-linux-musl.tgz" \
         | tar -xz -C /usr/local/cargo/bin \
     && cargo binstall --no-confirm --locked cargo-leptos@${CARGO_LEPTOS_VERSION}
 
