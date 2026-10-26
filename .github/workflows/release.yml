@@ -47,6 +47,11 @@ jobs:
 
       - name: Build
         run: cargo leptos build --release --cargo-locked
+        env:
+          # Link the C runtime into the .exe, so it runs on Windows installs
+          # without the Visual C++ Redistributable (VCRUNTIME140.dll). Only
+          # applies to the Windows target, not the wasm build.
+          CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS: -C target-feature=+crt-static
 
       - name: Package
         run: |
