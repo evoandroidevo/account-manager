@@ -118,7 +118,10 @@ tiers:
     description: One stream at a time, standard quality away from home, no transcoding(If device doesnt support video wont play).
     lldap_groups: [user, jelly]
     jellyfin:
-      max_active_sessions: 1 # 0 = unlimited
+      max_active_sessions: 0 # logged-in devices, 0 = unlimited; streams are capped below instead
+      # Simultaneous streams; needs the StreamLimit plugin, so leave out without
+      # it. 0 means the plugin's default, not unlimited: use a large number.
+      max_streams: 1
       remote_bitrate_limit_mbps: 8 # 0 = unlimited
       transcoding: false
       downloads: false
@@ -137,7 +140,8 @@ tiers:
     # Whop plans that grant this tier; the first is used for the buy button.
     whop_plan_ids: [plan_change-me-plus]
     jellyfin:
-      max_active_sessions: 3
+      max_active_sessions: 0
+      max_streams: 3
       remote_bitrate_limit_mbps: 15
       transcoding: true
       downloads: false
@@ -154,7 +158,8 @@ tiers:
     lldap_groups: [user, jelly, premium]
     whop_plan_ids: [plan_change-me-premium]
     jellyfin:
-      max_active_sessions: 5
+      max_active_sessions: 0
+      max_streams: 5
       remote_bitrate_limit_mbps: 25
       transcoding: true
       downloads: true
@@ -172,6 +177,7 @@ tiers:
     whop_plan_ids: [plan_change-me-premiumplus]
     jellyfin:
       max_active_sessions: 0
+      max_streams: 99 # effectively unlimited
       remote_bitrate_limit_mbps: 75
       transcoding: true
       downloads: true

@@ -156,8 +156,13 @@ background worker applies the tier to every enabled service, in order:
 1. **LLDAP groups**: adds the tier's `lldap_groups` and removes groups that
    belong only to other tiers. Groups no tier mentions are never touched.
 2. **Jellyfin**: creates missing accounts on the LDAP login provider (so the
-   LLDAP password works) and merges the tier into the user policy.
+   LLDAP password works), merges the tier into the user policy, and sets the
+   tier's `max_streams` in the [StreamLimit plugin](https://github.com/JellyboxAD/Jellyfin.Plugin.StreamLimit).
 3. **Seerr**: imports the user from Jellyfin and sets quotas and permissions.
+
+`max_streams` needs the plugin; leave it out without it, or every sync fails.
+The plugin's default limit starts at 0 (unlimited), so set it to 1 in its
+settings to give accounts that haven't synced yet the Free limit.
 
 Jellyfin administrators and Seerr's owner/admin accounts are left alone.
 Existing non-admin accounts **are** updated to their tier's settings on the
