@@ -55,6 +55,13 @@ pub fn credit_cents(
     credit.clamp(0, cap_cents.max(0))
 }
 
+/// Whether the current period was paid for, so its unused part can be
+/// credited. A trial wasn't, and neither was a period whose renewal failed
+/// (`past_due`), though both still give access.
+fn earns_credit(status: &str) -> bool {
+    matches!(status, "active" | "canceling")
+}
+
 fn parse_time(value: Option<&str>) -> Option<DateTime<Utc>> {
     value
         .and_then(|value| DateTime::parse_from_rfc3339(value).ok())
@@ -143,7 +150,7 @@ pub async fn plan_options(
             parse_time(plan.membership.current_period_end.as_deref()),
         );
         if let (Some(start), Some(end)) = period
-            && plan.membership.status != "trialing"
+            && earns_credit(&plan.membership.status)
         {
             match client.plan_price(&plan.membership.plan_id).await {
                 Ok(price) => credit_source = Some((price.renewal_cents(), start, end)),
@@ -285,7 +292,7 @@ pub async fn start_checkout(
             parse_time(plan.membership.current_period_end.as_deref()),
         );
         if let (Some(start), Some(end)) = period
-            && plan.membership.status != "trialing"
+            && earns_credit(&plan.membership.status)
         {
             let current = client
                 .plan_price(&plan.membership.plan_id)
@@ -592,7 +599,7 @@ async fn retire_replaced(
 mod tests {
     use chrono::{DateTime, Duration, Utc};
 
-    use super::credit_cents;
+    use super::{credit_cents, earns_credit};
 
     fn at(value: &str) -> DateTime<Utc> {
         DateTime::parse_from_rfc3339(value).unwrap().with_timezone(&Utc)
@@ -624,6 +631,14 @@ mod tests {
         assert_eq!(credit_cents(500, start, start, start, 1500), 0);
         assert_eq!(credit_cents(500, start, start - Duration::days(1), start, 1500), 0);
         assert_eq!(credit_cents(0, start, start + Duration::days(30), start, 1500), 0);
+    }
+
+    #[test]
+    fn only_paid_periods_earn_credit() {
+        assert!(earns_credit("active"));
+        assert!(earns_credit("canceling"));
+        assert!(!earns_credit("past_due"));
+        assert!(!earns_credit("trialing"));
     }
 
     mod upgrades {
@@ -852,6 +867,34 @@ mod tests {
                     credit_used_up: true,
                 }
             );
+
+            let _ = std::fs::remove_file(db);
+        }
+
+        #[tokio::test]
+        async fn an_unpaid_period_earns_no_credit_on_the_page_or_at_checkout() {
+            let server = MockServer::start().await;
+            mock_prices_and_checkout(&server).await;
+            mock_promo_codes(&server, 0).await;
+            let (state, user_id, db) = state(&server).await;
+            sqlx::query("UPDATE whop_memberships SET status = 'past_due'")
+                .execute(&state.pool)
+                .await
+                .unwrap();
+
+            let options = plan_options(&state, &user_id, "plus").await.unwrap();
+            let premium = options.tiers.iter().find(|(tier, _)| tier.id == "premium").unwrap();
+            assert_eq!(
+                premium.1,
+                PlanOption::Upgrade {
+                    list_cents: 1500,
+                    credit_cents: 0,
+                    from_tier: "plus".to_owned(),
+                    credit_used_up: false,
+                }
+            );
+            let url = start_checkout(&state, &user_id, "alice", "premium").await.unwrap();
+            assert_eq!(promo_code(&url), None);
 
             let _ = std::fs::remove_file(db);
         }

@@ -186,7 +186,8 @@ to another plan, so:
 
 - **Upgrades** are a new checkout whose first payment is reduced by the unused
   part of the current period (old renewal price × time left, capped at the new
-  first payment, skipped below $0.50 or while trialing). The credit is a
+  first payment, skipped below $0.50, while trialing or after a failed
+  renewal). The credit is a
   single-use promo code limited to the new plan, applied with `?promoCode=` on
   the checkout link. Starting the upgrade again reuses the code until it nears
   its 2-hour expiry. Whop can't tie a code to a buyer, so an upgrade gets at
