@@ -53,10 +53,9 @@ pub async fn login(username: String, password: String) -> Result<(), ServerFnErr
     let audit_meta = serde_json::json!({ "ip": ip });
 
     if state.login_throttle.is_blocked(&keys) {
-        state
-            .audit
-            .record_best_effort(None, "login_throttled", Some(&username), Some(audit_meta))
-            .await;
+        // Not the audit log: blocked requests have no limit of their own, so
+        // each would add a row.
+        log::warn!("login throttled for {username} (ip {ip:?})");
         return Err(ServerFnError::new(
             "Too many failed attempts. Please wait a few minutes and try again.",
         ));
