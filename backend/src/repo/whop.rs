@@ -32,6 +32,21 @@ pub struct PendingDowngrade {
     pub created_at: String,
 }
 
+/// The promo code issued for one upgrade. `expires_at` is RFC 3339 UTC to the
+/// second, so stored values compare correctly as text.
+#[derive(Clone, Debug, FromRow, PartialEq, Eq)]
+pub struct UpgradeCredit {
+    pub user_id: String,
+    pub from_membership_id: String,
+    pub to_plan_id: String,
+    pub promo_code: String,
+    pub credit_cents: i64,
+    pub expires_at: String,
+    pub redeemed_by_membership: Option<String>,
+    /// Promo codes issued for this upgrade so far.
+    pub issued_count: i64,
+}
+
 #[derive(Clone, Debug, FromRow, PartialEq, Eq)]
 pub struct WebhookEvent {
     pub id: String,
@@ -183,6 +198,107 @@ impl WhopRepository {
         Ok(())
     }
 
+    /// The credit on record for an upgrade, if any.
+    pub async fn upgrade_credit(
+        &self,
+        user_id: &str,
+        from_membership_id: &str,
+        to_plan_id: &str,
+    ) -> Result<Option<UpgradeCredit>, sqlx::Error> {
+        sqlx::query_as::<_, UpgradeCredit>(
+            "SELECT user_id, from_membership_id, to_plan_id, promo_code, credit_cents,
+                    expires_at, redeemed_by_membership, issued_count
+             FROM upgrade_credits
+             WHERE user_id = ? AND from_membership_id = ? AND to_plan_id = ?",
+        )
+        .bind(user_id)
+        .bind(from_membership_id)
+        .bind(to_plan_id)
+        .fetch_optional(&self.pool)
+        .await
+    }
+
+    /// Claims the credit for an upgrade, atomically so concurrent checkouts
+    /// can't both mint a code. Returns the credit now on record, and whether
+    /// it's the new one: the record stays as it is when its code expires after
+    /// `reuse_until`, when it was redeemed, or when `max_issued` codes have
+    /// already been issued.
+    pub async fn claim_upgrade_credit(
+        &self,
+        credit: &UpgradeCredit,
+        reuse_until: &str,
+        max_issued: i64,
+    ) -> Result<(UpgradeCredit, bool), sqlx::Error> {
+        let result = sqlx::query(
+            "INSERT INTO upgrade_credits
+                (user_id, from_membership_id, to_plan_id, promo_code, credit_cents,
+                 expires_at, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT (user_id, from_membership_id, to_plan_id) DO UPDATE SET
+                promo_code = excluded.promo_code,
+                credit_cents = excluded.credit_cents,
+                expires_at = excluded.expires_at,
+                created_at = excluded.created_at,
+                issued_count = upgrade_credits.issued_count + 1
+             WHERE upgrade_credits.redeemed_by_membership IS NULL
+               AND upgrade_credits.expires_at <= ?
+               AND upgrade_credits.issued_count < ?",
+        )
+        .bind(&credit.user_id)
+        .bind(&credit.from_membership_id)
+        .bind(&credit.to_plan_id)
+        .bind(&credit.promo_code)
+        .bind(credit.credit_cents)
+        .bind(&credit.expires_at)
+        .bind(now_rfc3339())
+        .bind(reuse_until)
+        .bind(max_issued)
+        .execute(&self.pool)
+        .await?;
+        let current = self
+            .upgrade_credit(&credit.user_id, &credit.from_membership_id, &credit.to_plan_id)
+            .await?
+            .ok_or(sqlx::Error::RowNotFound)?;
+        Ok((current, result.rows_affected() == 1))
+    }
+
+    /// Gives up a claimed credit whose code couldn't be created: it doesn't
+    /// count towards the limit, and the next checkout mints again. The record
+    /// stays, so earlier codes still count.
+    pub async fn release_upgrade_credit(&self, credit: &UpgradeCredit) -> Result<(), sqlx::Error> {
+        sqlx::query(
+            "UPDATE upgrade_credits SET issued_count = issued_count - 1, expires_at = ''
+             WHERE user_id = ? AND from_membership_id = ? AND to_plan_id = ? AND promo_code = ?",
+        )
+        .bind(&credit.user_id)
+        .bind(&credit.from_membership_id)
+        .bind(&credit.to_plan_id)
+        .bind(&credit.promo_code)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Marks the user's open credits towards `to_plan_id` as used by
+    /// `membership_id`.
+    pub async fn redeem_upgrade_credits(
+        &self,
+        user_id: &str,
+        to_plan_id: &str,
+        membership_id: &str,
+    ) -> Result<(), sqlx::Error> {
+        sqlx::query(
+            "UPDATE upgrade_credits SET redeemed_by_membership = ?
+             WHERE user_id = ? AND to_plan_id = ? AND redeemed_by_membership IS NULL",
+        )
+        .bind(membership_id)
+        .bind(user_id)
+        .bind(to_plan_id)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
     /// Claims a webhook delivery. Returns false if this id was already
     /// received, so retries are only processed once.
     pub async fn claim_event(&self, id: &str, event_type: &str) -> Result<bool, sqlx::Error> {
@@ -242,7 +358,7 @@ impl WhopRepository {
 mod tests {
     use sqlx::sqlite::SqlitePoolOptions;
 
-    use super::{WhopMembership, WhopRepository};
+    use super::{UpgradeCredit, WhopMembership, WhopRepository};
     use crate::repo::users::UserRepository;
 
     async fn setup() -> (WhopRepository, String) {
@@ -304,6 +420,72 @@ mod tests {
         assert_eq!(repo.pending_downgrade(&user_id).await.unwrap().unwrap().to_tier, "free");
         repo.clear_pending_downgrade(&user_id).await.unwrap();
         assert!(repo.pending_downgrade(&user_id).await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn upgrade_credits_are_reused_until_expired_or_redeemed() {
+        let (repo, user_id) = setup().await;
+        let credit = |code: &str, cents, expires: &str| UpgradeCredit {
+            user_id: user_id.clone(),
+            from_membership_id: "mem_1".to_owned(),
+            to_plan_id: "plan_premium".to_owned(),
+            promo_code: code.to_owned(),
+            credit_cents: cents,
+            expires_at: expires.to_owned(),
+            redeemed_by_membership: None,
+            issued_count: 1,
+        };
+        let (first_expiry, second_expiry) = ("2026-11-01T02:00:00Z", "2026-11-01T04:00:00Z");
+
+        let (issued, claimed) = repo
+            .claim_upgrade_credit(&credit("upa", 250, first_expiry), "2026-11-01T01:00:00Z", 3)
+            .await
+            .unwrap();
+        assert!(claimed);
+        assert_eq!((issued.promo_code.as_str(), issued.issued_count), ("upa", 1));
+
+        // Still has time left: the first code stands.
+        let (issued, claimed) = repo
+            .claim_upgrade_credit(&credit("upb", 240, second_expiry), "2026-11-01T01:30:00Z", 3)
+            .await
+            .unwrap();
+        assert!(!claimed);
+        assert_eq!((issued.promo_code.as_str(), issued.credit_cents, issued.issued_count), ("upa", 250, 1));
+
+        // Expired: replaced.
+        let (issued, claimed) = repo
+            .claim_upgrade_credit(&credit("upb", 240, second_expiry), "2026-11-01T02:30:00Z", 3)
+            .await
+            .unwrap();
+        assert!(claimed);
+        assert_eq!((issued.promo_code.as_str(), issued.credit_cents, issued.issued_count), ("upb", 240, 2));
+
+        // Releasing a failed claim gives the slot back and lets the next
+        // checkout mint, even though the code's expiry hadn't passed.
+        repo.release_upgrade_credit(&issued).await.unwrap();
+        let (issued, claimed) = repo
+            .claim_upgrade_credit(&credit("upc", 230, second_expiry), "2026-11-01T02:40:00Z", 3)
+            .await
+            .unwrap();
+        assert!(claimed);
+        assert_eq!((issued.promo_code.as_str(), issued.issued_count), ("upc", 2));
+
+        // At the limit: not replaced, even after it expires.
+        let (issued, claimed) = repo
+            .claim_upgrade_credit(&credit("upd", 220, "2026-11-01T09:00:00Z"), "2026-11-01T08:00:00Z", 2)
+            .await
+            .unwrap();
+        assert!(!claimed);
+        assert_eq!(issued.promo_code, "upc");
+
+        // Redeemed: never replaced, even with room under the limit.
+        repo.redeem_upgrade_credits(&user_id, "plan_premium", "mem_2").await.unwrap();
+        let (issued, claimed) = repo
+            .claim_upgrade_credit(&credit("upd", 220, "2026-11-01T09:00:00Z"), "2026-11-01T08:00:00Z", 3)
+            .await
+            .unwrap();
+        assert!(!claimed);
+        assert_eq!(issued.redeemed_by_membership.as_deref(), Some("mem_2"));
     }
 
     #[tokio::test]

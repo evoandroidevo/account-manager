@@ -196,9 +196,12 @@ fn TierCard(tier: BillingTier, actions: PlanActions) -> impl IntoView {
     let action = match offer {
         TierOffer::Current => view! { <span class="status status-ok">"Current plan"</span> }.into_any(),
         TierOffer::Buy { charge: _ } => checkout_button(format!("Get {name}"), id).into_any(),
-        TierOffer::Upgrade { charge, list, credit, from } => {
+        TierOffer::Upgrade { charge, list, credit, from, credit_used_up } => {
             let quote = match credit {
                 Some(credit) => format!("{charge} today ({list} minus {credit} for the unused part of {from})"),
+                None if credit_used_up => {
+                    format!("{charge} today (the credit for the unused part of {from} is no longer available)")
+                }
                 None => format!("{charge} today"),
             };
             view! {

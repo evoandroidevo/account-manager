@@ -188,7 +188,10 @@ to another plan, so:
   part of the current period (old renewal price × time left, capped at the new
   first payment, skipped below $0.50 or while trialing). The credit is a
   single-use promo code limited to the new plan, applied with `?promoCode=` on
-  the checkout link. Once the new membership is active the old one is
+  the checkout link. Starting the upgrade again reuses the code until it nears
+  its 2-hour expiry. Whop can't tie a code to a buyer, so an upgrade gets at
+  most 3 codes per membership; after the last one expires, it's at full price
+  and the plans page says so. Once the new membership is active the old one is
   cancelled immediately. The API key needs the promo code and membership
   management permissions.
 - **Downgrades** (including to the free tier) are scheduled: the current
