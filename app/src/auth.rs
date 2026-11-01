@@ -39,6 +39,11 @@ pub async fn login(username: String, password: String) -> Result<(), ServerFnErr
     let state = &ctx.state;
     // LLDAP user ids are case-insensitive and stored lowercase.
     let username = username.trim().to_ascii_lowercase();
+    // Can't be an account, so don't let it reach the throttle or audit log:
+    // nothing else limits its length.
+    if backend::validation::validate_username(&username).is_err() {
+        return Err(ServerFnError::new("Invalid username or password."));
+    }
     let ip = ctx.client_ip.clone();
 
     let mut keys = vec![format!("user:{username}")];

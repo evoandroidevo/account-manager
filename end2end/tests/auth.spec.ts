@@ -1,3 +1,4 @@
+import { DatabaseSync } from "node:sqlite";
 import { test, expect } from "@playwright/test";
 import { ALICE, BOB, failOnConsoleErrors, gotoHydrated, login, submitLogin } from "./helpers";
 
@@ -70,6 +71,20 @@ test.describe("without JavaScript", () => {
     await page.waitForURL("/");
     await expect(page.getByRole("heading", { name: "Alice Example" })).toBeVisible();
   });
+});
+
+test("a username that can't exist isn't written to the audit log", async ({ page, request }) => {
+  await page.goto("/login");
+  const action = await page.locator("form").getAttribute("action");
+  const username = `longprobe${"a".repeat(100_000)}`;
+
+  const response = await request.post(action!, { form: { username, password: "x" } });
+  expect(await response.text()).toContain("Invalid username or password.");
+
+  const db = new DatabaseSync("../data/e2e.db", { readOnly: true });
+  const rows = db.prepare("SELECT count(*) AS n FROM audit_log WHERE target LIKE 'longprobe%'").get();
+  db.close();
+  expect(rows).toMatchObject({ n: 0 });
 });
 
 test("cross-origin form posts are refused", async ({ page, request }) => {
