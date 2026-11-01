@@ -36,6 +36,7 @@ pub struct AppState {
     /// Present when `whop.enabled`.
     pub whop_client: Option<WhopClient>,
     pub login_throttle: LoginThrottle,
+    pub checkout_throttle: LoginThrottle,
 }
 
 impl AppState {
@@ -76,6 +77,10 @@ impl AppState {
             lldap: LldapClient::new(config.ldap.clone()),
             mailer: Mailer::new(&config.mail)?,
             login_throttle,
+            checkout_throttle: LoginThrottle::new(
+                crate::plan_change::CHECKOUT_MAX_ATTEMPTS,
+                crate::plan_change::CHECKOUT_WINDOW,
+            ),
             config: Arc::new(config),
             pool,
         })

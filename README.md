@@ -156,8 +156,13 @@ background worker applies the tier to every enabled service, in order:
 1. **LLDAP groups**: adds the tier's `lldap_groups` and removes groups that
    belong only to other tiers. Groups no tier mentions are never touched.
 2. **Jellyfin**: creates missing accounts on the LDAP login provider (so the
-   LLDAP password works) and merges the tier into the user policy.
+   LLDAP password works), merges the tier into the user policy, and sets the
+   tier's `max_streams` in the [StreamLimit plugin](https://github.com/JellyboxAD/Jellyfin.Plugin.StreamLimit).
 3. **Seerr**: imports the user from Jellyfin and sets quotas and permissions.
+
+`max_streams` needs the plugin; leave it out without it, or every sync fails.
+The plugin's default limit starts at 0 (unlimited), so set it to 1 in its
+settings to give accounts that haven't synced yet the Free limit.
 
 Jellyfin administrators and Seerr's owner/admin accounts are left alone.
 Existing non-admin accounts **are** updated to their tier's settings on the
@@ -186,9 +191,13 @@ to another plan, so:
 
 - **Upgrades** are a new checkout whose first payment is reduced by the unused
   part of the current period (old renewal price × time left, capped at the new
-  first payment, skipped below $0.50 or while trialing). The credit is a
+  first payment, skipped below $0.50, while trialing or after a failed
+  renewal). The credit is a
   single-use promo code limited to the new plan, applied with `?promoCode=` on
-  the checkout link. Once the new membership is active the old one is
+  the checkout link. Starting the upgrade again reuses the code until it nears
+  its 2-hour expiry. Whop can't tie a code to a buyer, so an upgrade gets at
+  most 3 codes per membership; after the last one expires, it's at full price
+  and the plans page says so. Once the new membership is active the old one is
   cancelled immediately. The API key needs the promo code and membership
   management permissions.
 - **Downgrades** (including to the free tier) are scheduled: the current

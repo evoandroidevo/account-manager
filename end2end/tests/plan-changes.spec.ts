@@ -66,6 +66,57 @@ test("upgrading takes the unused part of the current plan off the new one", asyn
     .toBe(5);
 });
 
+test("repeated upgrade clicks reuse one credit, and any higher plan retires the lower one", async ({ page, browser }) => {
+  const user = await signUpNewUser(browser);
+  await login(page, user.username, user.password);
+  await gotoHydrated(page, "/billing");
+  await page.getByRole("button", { name: "Get Plus" }).click();
+  await pay(page, "Plus");
+  const plus = await membershipId(page);
+  expect((await mockWhop(`/test/memberships/${plus}/halfway`)).webhook_status).toBe(200);
+
+  // Starting the upgrade twice hands out the same promo code.
+  const before = (await mockWhopGet("/test/promo_codes")).length;
+  const links = [];
+  for (let attempt = 0; attempt < 2; attempt++) {
+    await gotoHydrated(page, "/billing");
+    await card(page, "premium").getByRole("button", { name: "Upgrade to Premium" }).click();
+    await page.waitForURL(`${MOCK_WHOP_URL}/checkout/**?promoCode=up*`);
+    links.push(new URL(page.url()).searchParams.get("promoCode"));
+  }
+  expect(links[0]).toBe(links[1]);
+  expect((await mockWhopGet("/test/promo_codes")).length).toBe(before + 1);
+
+  // Premium bought on Whop directly (no replaces_membership metadata) still
+  // cancels Plus.
+  const premium = await mockWhop("/test/memberships", { plan_id: "plan_premium", email: user.email });
+  expect(premium.webhook_status).toBe(200);
+  await expect.poll(async () => (await mockWhopGet(`/test/memberships/${plus}`)).status, SYNC).toBe("canceled");
+});
+
+test("a failed renewal keeps access but earns no upgrade credit", async ({ page, browser }) => {
+  const user = await signUpNewUser(browser);
+  await login(page, user.username, user.password);
+  await gotoHydrated(page, "/billing");
+  await page.getByRole("button", { name: "Get Plus" }).click();
+  await pay(page, "Plus");
+  const plus = await membershipId(page);
+  expect((await mockWhop(`/test/memberships/${plus}/halfway`)).webhook_status).toBe(200);
+  expect((await mockWhop(`/test/memberships/${plus}/past_due`)).webhook_status).toBe(200);
+
+  await gotoHydrated(page, "/billing");
+  await expect(page.getByTestId("current-plan")).toContainText("Your plan: Plus");
+  await expect(card(page, "premium").getByTestId("upgrade-quote")).toHaveText("$15.00 today");
+
+  // The checkout charges full price, and no promo code is created for it.
+  const before = (await mockWhopGet("/test/promo_codes")).length;
+  await card(page, "premium").getByRole("button", { name: "Upgrade to Premium" }).click();
+  await page.waitForURL(`${MOCK_WHOP_URL}/checkout/**`);
+  await expect(page.getByTestId("amount-due")).toHaveText("Due today: $15.00");
+  expect(new URL(page.url()).searchParams.has("promoCode")).toBe(false);
+  expect((await mockWhopGet("/test/promo_codes")).length).toBe(before);
+});
+
 test("downgrading waits for the end of the paid period and can be undone", async ({ page, browser }) => {
   const user = await signUpNewUser(browser);
   await login(page, user.username, user.password);

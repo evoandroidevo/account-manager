@@ -236,8 +236,12 @@ pub struct TierConfig {
 /// in Jellyfin, except `libraries`, where leaving it out means all libraries.
 #[derive(Clone, Debug, Default, Deserialize, PartialEq)]
 pub struct JellyfinTier {
-    /// Simultaneous streams; 0 means unlimited.
+    /// Logged-in devices (not playback; see `max_streams`); 0 means unlimited.
     pub max_active_sessions: Option<i32>,
+    /// Simultaneous streams, set through the StreamLimit plugin; leave out on
+    /// servers without it. 0 removes the user's limit so the plugin's default
+    /// applies, so use a large number for unlimited.
+    pub max_streams: Option<u32>,
     /// Cap for streams outside the LAN, in Mbit/s; 0 means unlimited.
     pub remote_bitrate_limit_mbps: Option<i32>,
     /// Allow transcoding (video and audio) and remuxing.

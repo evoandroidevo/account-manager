@@ -77,7 +77,38 @@ impl JellyfinClient {
                 .map_err(|error| format!("updating Jellyfin policy failed: {error}"))?;
             check(response, "updating Jellyfin policy").await?;
         }
+        if let Some(streams) = tier.and_then(|tier| tier.max_streams) {
+            self.sync_stream_limit(&id, streams).await?;
+        }
         Ok(SyncOutcome::done(Some(id)))
+    }
+
+    /// Sets the user's limit in the StreamLimit plugin, only when it differs.
+    /// The plugin leaves `explicitLimit` out for users without their own
+    /// limit, which is the same as 0: its default applies.
+    async fn sync_stream_limit(&self, id: &str, streams: u32) -> Result<(), String> {
+        let response = self
+            .request(reqwest::Method::GET, "/StreamLimit/GetUserStreamLimit")
+            .query(&[("userId", id)])
+            .send()
+            .await
+            .map_err(|error| format!("reading Jellyfin stream limit failed: {error}"))?;
+        let current: Value = check(response, "reading Jellyfin stream limit (is the StreamLimit plugin installed?)")
+            .await?
+            .json()
+            .await
+            .map_err(|error| format!("reading Jellyfin stream limit failed: {error}"))?;
+        if current["explicitLimit"].as_u64().unwrap_or(0) == u64::from(streams) {
+            return Ok(());
+        }
+        let response = self
+            .request(reqwest::Method::POST, "/StreamLimit/SetUserStreamLimit")
+            .query(&[("userId", id.to_owned()), ("streamsAllowed", streams.to_string())])
+            .send()
+            .await
+            .map_err(|error| format!("setting Jellyfin stream limit failed: {error}"))?;
+        check(response, "setting Jellyfin stream limit").await?;
+        Ok(())
     }
 
     /// Settings for every managed account, whatever the tier: recording
@@ -242,7 +273,7 @@ mod tests {
     use serde_json::{Value, json};
     use wiremock::{
         Mock, MockServer, ResponseTemplate,
-        matchers::{body_partial_json, header, method, path},
+        matchers::{body_partial_json, header, method, path, path_regex, query_param},
     };
 
     use super::JellyfinClient;
@@ -282,7 +313,53 @@ mod tests {
             downloads: Some(true),
             live_tv: Some(false),
             libraries: Some(vec!["movies".to_owned()]),
+            max_streams: None,
         }
+    }
+
+    /// A tier with only a stream limit, for a user whose policy needs no
+    /// change, so any POST seen is the plugin's.
+    fn streams_tier(max_streams: Option<u32>) -> JellyfinTier {
+        JellyfinTier { max_streams, ..JellyfinTier::default() }
+    }
+
+    async fn mount_settled_user(server: &MockServer) {
+        let mut current = policy(false);
+        current["EnableLiveTvManagement"] = json!(false);
+        Mock::given(method("GET"))
+            .and(path("/Users"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+                { "Name": "alice", "Id": "u1", "Policy": current }
+            ])))
+            .mount(server)
+            .await;
+    }
+
+    /// The plugin's answer about u1: `limit` is left out when there is none,
+    /// as the real plugin does.
+    async fn mount_stream_limit(server: &MockServer, limit: Option<u32>) {
+        let mut body = json!({ "userId": "u1", "streamsAllowed": limit.unwrap_or(1) });
+        if let Some(limit) = limit {
+            body["explicitLimit"] = json!(limit);
+        }
+        Mock::given(method("GET"))
+            .and(path("/StreamLimit/GetUserStreamLimit"))
+            .and(query_param("userId", "u1"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(body))
+            .expect(1)
+            .mount(server)
+            .await;
+    }
+
+    async fn expect_set_stream_limit(server: &MockServer, streams: &str, times: u64) {
+        Mock::given(method("POST"))
+            .and(path("/StreamLimit/SetUserStreamLimit"))
+            .and(query_param("userId", "u1"))
+            .and(query_param("streamsAllowed", streams))
+            .respond_with(ResponseTemplate::new(200))
+            .expect(times)
+            .mount(server)
+            .await;
     }
 
     async fn mount_libraries(server: &MockServer) {
@@ -475,6 +552,86 @@ mod tests {
 
         let outcome = client(&server).sync("admin", Some(&tier())).await.unwrap();
         assert!(outcome.skipped);
+    }
+
+    #[tokio::test]
+    async fn sets_the_stream_limit_when_it_differs() {
+        let server = MockServer::start().await;
+        mount_settled_user(&server).await;
+        mount_stream_limit(&server, Some(1)).await;
+        expect_set_stream_limit(&server, "3", 1).await;
+
+        client(&server).sync("alice", Some(&streams_tier(Some(3)))).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn sets_the_stream_limit_for_a_user_without_one() {
+        let server = MockServer::start().await;
+        mount_settled_user(&server).await;
+        mount_stream_limit(&server, None).await;
+        expect_set_stream_limit(&server, "1", 1).await;
+
+        client(&server).sync("alice", Some(&streams_tier(Some(1)))).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn leaves_a_matching_stream_limit_alone() {
+        let server = MockServer::start().await;
+        mount_settled_user(&server).await;
+        mount_stream_limit(&server, Some(3)).await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(200))
+            .expect(0)
+            .mount(&server)
+            .await;
+
+        client(&server).sync("alice", Some(&streams_tier(Some(3)))).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn makes_no_plugin_calls_without_a_stream_limit() {
+        let server = MockServer::start().await;
+        mount_settled_user(&server).await;
+        Mock::given(path_regex("^/StreamLimit/"))
+            .respond_with(ResponseTemplate::new(404))
+            .expect(0)
+            .mount(&server)
+            .await;
+
+        client(&server).sync("alice", Some(&streams_tier(None))).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn never_sets_a_stream_limit_on_administrators() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/Users"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+                { "Name": "admin", "Id": "u0", "Policy": policy(true) }
+            ])))
+            .mount(&server)
+            .await;
+        Mock::given(path_regex("^/StreamLimit/"))
+            .respond_with(ResponseTemplate::new(200))
+            .expect(0)
+            .mount(&server)
+            .await;
+
+        let outcome = client(&server).sync("admin", Some(&streams_tier(Some(3)))).await.unwrap();
+        assert!(outcome.skipped);
+    }
+
+    #[tokio::test]
+    async fn a_missing_plugin_is_reported_as_such() {
+        let server = MockServer::start().await;
+        mount_settled_user(&server).await;
+        Mock::given(path("/StreamLimit/GetUserStreamLimit"))
+            .respond_with(ResponseTemplate::new(404))
+            .mount(&server)
+            .await;
+
+        let error = client(&server).sync("alice", Some(&streams_tier(Some(3)))).await.unwrap_err();
+        assert!(error.contains("StreamLimit plugin"), "{error}");
     }
 
     #[tokio::test]

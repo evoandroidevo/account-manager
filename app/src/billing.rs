@@ -14,8 +14,9 @@ pub enum TierOffer {
     /// Buy it; `charge` is the first payment, e.g. "$5.00".
     Buy { charge: String },
     /// Switch now, paying `charge` (`list` minus `credit` for the unused
-    /// part of `from`).
-    Upgrade { charge: String, list: String, credit: Option<String>, from: String },
+    /// part of `from`). `credit_used_up`: no credit, because it was already
+    /// spent or its promo codes ran out.
+    Upgrade { charge: String, list: String, credit: Option<String>, from: String, credit_used_up: bool },
     /// Switch when the current paid period ends, on `effective`.
     Downgrade { effective: String, scheduled: bool },
     Unavailable,
@@ -104,13 +105,14 @@ pub async fn billing_overview() -> Result<BillingInfo, ServerFnError> {
                 let offer = match option {
                     PlanOption::Current => TierOffer::Current,
                     PlanOption::Buy { charge_cents } => TierOffer::Buy { charge: money(charge_cents) },
-                    PlanOption::Upgrade { list_cents, credit_cents, from_tier } => {
+                    PlanOption::Upgrade { list_cents, credit_cents, from_tier, credit_used_up } => {
                         let credit = (credit_cents >= MIN_CREDIT_CENTS).then_some(credit_cents);
                         TierOffer::Upgrade {
                             charge: money(list_cents - credit.unwrap_or(0)),
                             list: money(list_cents),
                             credit: credit.map(money),
                             from: from_tier,
+                            credit_used_up,
                         }
                     }
                     PlanOption::Downgrade { effective } => TierOffer::Downgrade {

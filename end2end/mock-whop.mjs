@@ -22,6 +22,8 @@
 //   POST /test/memberships/:id/halfway (test control) moves the billing
 //                                      period so half of it is used, and
 //                                      sends membership.updated
+//   POST /test/memberships/:id/past_due (test control) a failed renewal: sets
+//                                      past_due and sends membership.updated
 //   GET  /test/memberships/:id         (test control) the membership
 //   GET  /test/promo_codes             (test control) created promo codes
 //   GET  /health
@@ -225,6 +227,14 @@ createServer(async (request, response) => {
       if (!membership) return send(response, 404, { error: { message: "no such membership" } });
       membership.current_period_start = new Date(Date.now() - 15 * DAY).toISOString();
       membership.current_period_end = new Date(Date.now() + 15 * DAY).toISOString();
+      const webhook_status = await sendWebhook("membership.updated", membership);
+      return send(response, 200, { ...membership, webhook_status });
+    }
+
+    if (request.method === "POST" && parts[0] === "test" && parts[1] === "memberships" && parts[3] === "past_due") {
+      const membership = memberships.get(parts[2]);
+      if (!membership) return send(response, 404, { error: { message: "no such membership" } });
+      membership.status = "past_due";
       const webhook_status = await sendWebhook("membership.updated", membership);
       return send(response, 200, { ...membership, webhook_status });
     }
