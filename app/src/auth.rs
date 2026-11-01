@@ -46,13 +46,11 @@ pub async fn login(username: String, password: String) -> Result<(), ServerFnErr
     }
     let ip = ctx.client_ip.clone();
 
-    let mut keys = vec![format!("user:{username}")];
-    if let Some(ip) = &ip {
-        keys.push(format!("ip:{ip}"));
-    }
+    let user_keys = [format!("user:{username}")];
+    let ip_keys: Vec<String> = ip.iter().map(|ip| format!("ip:{ip}")).collect();
     let audit_meta = serde_json::json!({ "ip": ip });
 
-    if state.login_throttle.is_blocked(&keys) {
+    if state.login_throttle.is_blocked(&ip_keys) || state.username_throttle.is_blocked(&user_keys) {
         // Not the audit log: blocked requests have no limit of their own, so
         // each would add a row.
         log::warn!("login throttled for {username} (ip {ip:?})");
@@ -67,7 +65,8 @@ pub async fn login(username: String, password: String) -> Result<(), ServerFnErr
         .await
         .map_err(|error| internal(format!("LDAP bind for {username} failed: {error}")))?;
     if !valid {
-        state.login_throttle.record_failure(&keys);
+        state.login_throttle.record_failure(&ip_keys);
+        state.username_throttle.record_failure(&user_keys);
         state
             .audit
             .record_best_effort(None, "login_failed", Some(&username), Some(audit_meta))
@@ -91,7 +90,8 @@ pub async fn login(username: String, password: String) -> Result<(), ServerFnErr
         return Err(ServerFnError::new("This account has been disabled."));
     }
 
-    state.login_throttle.clear(&keys);
+    state.login_throttle.clear(&ip_keys);
+    state.username_throttle.clear(&user_keys);
     if let Err(error) = state.users.touch_login(&user.id).await {
         log::warn!("failed to record login time for {username}: {error}");
     }

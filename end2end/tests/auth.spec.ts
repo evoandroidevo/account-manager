@@ -87,6 +87,29 @@ test("a username that can't exist isn't written to the audit log", async ({ page
   expect(rows).toMatchObject({ n: 0 });
 });
 
+test("failures from one IP don't lock the user out elsewhere, but many IPs do", async ({ page, request }) => {
+  await page.goto("/login");
+  const action = (await page.locator("form").getAttribute("action"))!;
+  const attempt = async (ip: string, username: string, password: string) =>
+    (
+      await request.post(action, {
+        headers: { "X-Forwarded-For": ip },
+        form: { username, password },
+        maxRedirects: 0,
+      })
+    ).text();
+  const BLOCKED = "Too many failed attempts";
+
+  // The attacker's IP gets blocked; Alice's own still works.
+  for (let i = 0; i < 5; i++) await attempt("203.0.113.1", ALICE.username, "wrong");
+  expect(await attempt("203.0.113.1", ALICE.username, ALICE.password)).toContain(BLOCKED);
+  expect(await attempt("203.0.113.2", ALICE.username, ALICE.password)).not.toContain(BLOCKED);
+
+  // Guessing one username from many IPs hits the per-username limit (10 × 5).
+  for (let i = 0; i < 50; i++) await attempt(`198.51.100.${i}`, "distributedtarget", "wrong");
+  expect(await attempt("198.51.100.200", "distributedtarget", "wrong")).toContain(BLOCKED);
+});
+
 test("cross-origin form posts are refused", async ({ page, request }) => {
   await page.goto("/login");
   const action = await page.locator("form").getAttribute("action");
