@@ -305,6 +305,10 @@ pub async fn signup(
         log::error!("queueing provisioning for {username} failed: {error}");
     }
 
+    // Nothing checked the address the user typed, so it stays unverified
+    // until they open this link.
+    send_verification_link(state, &user.id, &username, &first_name, &email).await;
+
     state
         .audit
         .record_best_effort(
@@ -350,6 +354,57 @@ async fn verify_current_password(
     }
     state.login_throttle.clear(&keys);
     Ok(())
+}
+
+/// Stores a link that sets the account's email to `email` (or only verifies
+/// it, if that's already the address) and returns the link.
+async fn store_email_link(
+    state: &AppState,
+    user_id: &str,
+    email: &str,
+) -> Result<String, AccountError> {
+    let token = generate_token();
+    let hours = state.config.mail.email_change_link_hours;
+    let expires_at = (Utc::now() + Duration::hours(hours)).to_rfc3339();
+    state
+        .email_changes
+        .create(user_id, email, &hash_token(&token), &expires_at)
+        .await
+        .map_err(|error| internal("storing email link failed", error))?;
+    Ok(format!(
+        "{}/confirm-email?token={token}",
+        state.config.server.public_url.trim_end_matches('/')
+    ))
+}
+
+/// Mails a link that verifies the account's current address. Failures are
+/// logged, not returned: the user can ask for another link.
+async fn send_verification_link(
+    state: &AppState,
+    user_id: &str,
+    username: &str,
+    name: &str,
+    email: &str,
+) {
+    let link = match store_email_link(state, user_id, email).await {
+        Ok(link) => link,
+        Err(error) => {
+            log::error!("could not create a verification link for {username}: {error}");
+            return;
+        }
+    };
+    let hours = state.config.mail.email_change_link_hours;
+    notify(
+        state,
+        email,
+        "Verify your email address",
+        format!(
+            "Hi {name},\n\nConfirm that this is the email address for your account \
+             \"{username}\" by opening the link below. It expires in {hours} hours.\n\n\
+             {link}\n\nIf you didn't create this account, you can ignore this email.\n"
+        ),
+    )
+    .await;
 }
 
 /// Sends a security notice, logging (not failing) if delivery breaks.
@@ -449,19 +504,8 @@ pub async fn request_email_change(
         return Err(rejected("That email address is already in use."));
     }
 
-    let token = generate_token();
+    let link = store_email_link(state, user_id, new_email).await?;
     let hours = state.config.mail.email_change_link_hours;
-    let expires_at = (Utc::now() + Duration::hours(hours)).to_rfc3339();
-    state
-        .email_changes
-        .create(user_id, new_email, &hash_token(&token), &expires_at)
-        .await
-        .map_err(|error| internal("storing email change failed", error))?;
-
-    let link = format!(
-        "{}/confirm-email?token={token}",
-        state.config.server.public_url.trim_end_matches('/')
-    );
     state
         .mailer
         .send(
