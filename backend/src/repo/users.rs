@@ -16,10 +16,22 @@ pub struct UserRecord {
     pub disabled_at: Option<String>,
     /// Unix seconds; sessions authenticated before this are invalid.
     pub password_changed_at: Option<i64>,
+    /// The address the user proved they own; LLDAP's may since have changed.
+    pub verified_email: Option<String>,
+    pub email_verified_at: Option<String>,
 }
 
-const USER_COLUMNS: &str =
-    "id, username, created_at, last_login_at, disabled_at, password_changed_at";
+impl UserRecord {
+    /// Whether `email` (the account's address in LLDAP) is the one verified.
+    pub fn has_verified(&self, email: &str) -> bool {
+        self.verified_email
+            .as_deref()
+            .is_some_and(|verified| verified.eq_ignore_ascii_case(email))
+    }
+}
+
+const USER_COLUMNS: &str = "id, username, created_at, last_login_at, disabled_at, \
+     password_changed_at, verified_email, email_verified_at";
 
 impl UserRepository {
     pub fn new(pool: SqlitePool) -> Self {
@@ -70,6 +82,16 @@ impl UserRepository {
     pub async fn set_password_changed_at(&self, id: &str, unix: i64) -> Result<(), sqlx::Error> {
         sqlx::query("UPDATE users SET password_changed_at = ? WHERE id = ?")
             .bind(unix)
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    pub async fn set_verified_email(&self, id: &str, email: &str) -> Result<(), sqlx::Error> {
+        sqlx::query("UPDATE users SET verified_email = ?, email_verified_at = ? WHERE id = ?")
+            .bind(email)
+            .bind(now_rfc3339())
             .bind(id)
             .execute(&self.pool)
             .await?;
@@ -127,5 +149,27 @@ mod tests {
             .expect("lookup should work")
             .expect("user should exist");
         assert!(user.last_login_at.is_some());
+    }
+
+    #[tokio::test]
+    async fn set_verified_email_records_the_address_and_time() {
+        let users = repository().await;
+        let user = users.ensure("carol").await.expect("user should be created");
+        assert!(user.verified_email.is_none());
+
+        users
+            .set_verified_email(&user.id, "carol@example.com")
+            .await
+            .expect("verification should be recorded");
+
+        let user = users
+            .find_by_id(&user.id)
+            .await
+            .expect("lookup should work")
+            .expect("user should exist");
+        assert_eq!(user.verified_email.as_deref(), Some("carol@example.com"));
+        assert!(user.email_verified_at.is_some());
+        assert!(user.has_verified("Carol@Example.com"));
+        assert!(!user.has_verified("someone@example.com"));
     }
 }

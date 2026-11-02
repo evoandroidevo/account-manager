@@ -36,6 +36,10 @@ const MAX_INVITE_HOURS: i64 = 24 * 30;
 const INVALID_INVITE: &str = "This invitation link is invalid or has expired.";
 const INVALID_EMAIL_LINK: &str = "This confirmation link is invalid or has expired.";
 
+/// Verification emails a user can ask for per `VERIFICATION_WINDOW`.
+pub const VERIFICATION_MAX_SENDS: usize = 3;
+pub const VERIFICATION_WINDOW: std::time::Duration = std::time::Duration::from_secs(60 * 60);
+
 /// 32 random alphanumeric characters (~190 bits). Only the hash is stored.
 pub fn generate_token() -> String {
     rand::rng()
@@ -305,6 +309,14 @@ pub async fn signup(
         log::error!("queueing provisioning for {username} failed: {error}");
     }
 
+    // Nothing checked the address the user typed, so it stays unverified
+    // until they open this link. Not a reason to fail: they can ask for
+    // another link from their account page.
+    if let Err(error) = send_verification_link(state, &user.id, &username, &first_name, &email).await
+    {
+        log::error!("could not send {username} a verification link: {error}");
+    }
+
     state
         .audit
         .record_best_effort(
@@ -350,6 +362,97 @@ async fn verify_current_password(
     }
     state.login_throttle.clear(&keys);
     Ok(())
+}
+
+/// Stores a link that sets the account's email to `email` (or only verifies
+/// it, if that's already the address) and returns the link.
+async fn store_email_link(
+    state: &AppState,
+    user_id: &str,
+    email: &str,
+) -> Result<String, AccountError> {
+    let token = generate_token();
+    let hours = state.config.mail.email_change_link_hours;
+    let expires_at = (Utc::now() + Duration::hours(hours)).to_rfc3339();
+    state
+        .email_changes
+        .create(user_id, email, &hash_token(&token), &expires_at)
+        .await
+        .map_err(|error| internal("storing email link failed", error))?;
+    Ok(format!(
+        "{}/confirm-email?token={token}",
+        state.config.server.public_url.trim_end_matches('/')
+    ))
+}
+
+/// Mails a link that verifies the account's current address.
+async fn send_verification_link(
+    state: &AppState,
+    user_id: &str,
+    username: &str,
+    name: &str,
+    email: &str,
+) -> Result<(), AccountError> {
+    let link = store_email_link(state, user_id, email).await?;
+    let hours = state.config.mail.email_change_link_hours;
+    state
+        .mailer
+        .send(
+            email,
+            "Verify your email address",
+            format!(
+                "Hi {name},\n\nConfirm that this is the email address for your account \
+                 \"{username}\" by opening the link below. It expires in {hours} hours.\n\n\
+                 {link}\n\nIf you didn't ask for this, you can ignore this email.\n"
+            ),
+        )
+        .await
+        .map_err(|error| internal("sending verification email failed", error))
+}
+
+/// Mails a new verification link for the account's current address and
+/// returns that address.
+pub async fn resend_verification(
+    state: &AppState,
+    user_id: &str,
+    username: &str,
+) -> Result<String, AccountError> {
+    let user = state
+        .users
+        .find_by_id(user_id)
+        .await
+        .map_err(|error| internal("user lookup failed", error))?
+        .ok_or_else(|| internal("user lookup failed", "user not found"))?;
+    let profile = state
+        .lldap
+        .get_user(username)
+        .await
+        .map_err(|error| internal("LLDAP lookup failed", error))?
+        .ok_or_else(|| internal("LLDAP lookup failed", "user not found"))?;
+    if user.has_verified(&profile.email) {
+        return Err(rejected("Your email address is already verified."));
+    }
+
+    // Each press sends an email, so it needs a limit of its own.
+    let keys = [format!("verify:{user_id}")];
+    if state.verification_throttle.is_blocked(&keys) {
+        return Err(rejected(
+            "We've sent several links recently. Check your inbox and spam folder, or try again later.",
+        ));
+    }
+    state.verification_throttle.record_failure(&keys);
+
+    send_verification_link(state, user_id, username, &profile.display_name, &profile.email).await?;
+    state
+        .audit
+        .record_best_effort(
+            Some(username),
+            "email_verification_sent",
+            None,
+            Some(serde_json::json!({ "email": profile.email })),
+        )
+        .await;
+    Ok(profile.email)
 }
 
 /// Sends a security notice, logging (not failing) if delivery breaks.
@@ -449,19 +552,8 @@ pub async fn request_email_change(
         return Err(rejected("That email address is already in use."));
     }
 
-    let token = generate_token();
+    let link = store_email_link(state, user_id, new_email).await?;
     let hours = state.config.mail.email_change_link_hours;
-    let expires_at = (Utc::now() + Duration::hours(hours)).to_rfc3339();
-    state
-        .email_changes
-        .create(user_id, new_email, &hash_token(&token), &expires_at)
-        .await
-        .map_err(|error| internal("storing email change failed", error))?;
-
-    let link = format!(
-        "{}/confirm-email?token={token}",
-        state.config.server.public_url.trim_end_matches('/')
-    );
     state
         .mailer
         .send(
@@ -550,6 +642,19 @@ pub async fn confirm_email_change(
     }
 
     let apply = async {
+        let old_email = state
+            .lldap
+            .get_user(&user.username)
+            .await
+            .map_err(|error| internal("LLDAP lookup failed", error))?
+            .map(|profile| profile.email);
+        // A link for the address the account already has only verifies it.
+        if old_email
+            .as_deref()
+            .is_some_and(|email| email.eq_ignore_ascii_case(&change.new_email))
+        {
+            return Ok(None);
+        }
         if state
             .lldap
             .email_exists(&change.new_email)
@@ -558,22 +663,17 @@ pub async fn confirm_email_change(
         {
             return Err(rejected("That email address is now used by another account."));
         }
-        let old_email = state
-            .lldap
-            .get_user(&user.username)
-            .await
-            .map_err(|error| internal("LLDAP lookup failed", error))?
-            .map(|profile| profile.email);
         state
             .lldap
             .update_email(&user.username, &change.new_email)
             .await
             .map_err(|error| internal("updating email failed", error))?;
-        Ok::<_, AccountError>(old_email)
+        Ok::<_, AccountError>(Some(old_email))
     };
 
-    let old_email = match apply.await {
-        Ok(old_email) => old_email,
+    // `None` when the address didn't change; otherwise the previous one, if any.
+    let replaced = match apply.await {
+        Ok(replaced) => replaced,
         Err(error) => {
             // Let the user retry the same link after a transient failure.
             if matches!(error, AccountError::Internal(_)) {
@@ -581,6 +681,28 @@ pub async fn confirm_email_change(
             }
             return Err(error);
         }
+    };
+
+    // Not a reason to fail: LLDAP already has the new address. Until this is
+    // recorded the address only counts as unverified.
+    if let Err(error) = state.users.set_verified_email(&user.id, &change.new_email).await {
+        log::error!("could not record {}'s verified email: {error}", user.username);
+    }
+
+    let Some(old_email) = replaced else {
+        state
+            .audit
+            .record_best_effort(
+                Some(&user.username),
+                "email_verified",
+                None,
+                Some(serde_json::json!({ "email": change.new_email })),
+            )
+            .await;
+        return Ok(PendingEmailChange {
+            username: user.username,
+            new_email: change.new_email,
+        });
     };
 
     state

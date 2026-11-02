@@ -145,6 +145,37 @@ export async function waitForEmail(to: string, subject: string): Promise<string>
   return found;
 }
 
+/** Waits until there are `count` emails to `to` with `subject`; returns them oldest first. */
+export async function waitForEmails(to: string, subject: string, count: number): Promise<string[]> {
+  let found: string[] = [];
+  await expect
+    .poll(
+      () => {
+        if (!fs.existsSync(OUTBOX)) return 0;
+        found = fs
+          .readdirSync(OUTBOX)
+          .map((file) => path.join(OUTBOX, file))
+          .map((file) => ({ raw: fs.readFileSync(file, "utf8"), sent: fs.statSync(file).mtimeMs }))
+          .filter(({ raw }) => raw.includes(`To: ${to}`) && raw.includes(`Subject: ${subject}`))
+          .sort((a, b) => a.sent - b.sent)
+          .map(({ raw }) => decodeQuotedPrintable(raw));
+        return found.length;
+      },
+      { message: `${count} emails "${subject}" to ${to}`, timeout: 5000 },
+    )
+    .toBe(count);
+  return found;
+}
+
+/** Opens the verification link sent at signup, in `page`. */
+export async function verifyEmail(page: Page, user: NewUser) {
+  const mail = await waitForEmail(user.email, "Verify your email address");
+  const link = mail.match(/http:\/\/127\.0\.0\.1:3000\/confirm-email\?token=[A-Za-z0-9]{32}/)![0];
+  await gotoHydrated(page, link);
+  await page.getByRole("button", { name: "Confirm change" }).click();
+  await expect(page.getByRole("heading", { name: "Email updated" })).toBeVisible();
+}
+
 // --- Dev Jellyfin and Seerr (set up by end2end/services.mjs) -----------------
 
 type Services = { jellyfin: { url: string; apiKey: string }; seerr: { url: string; apiKey: string } };

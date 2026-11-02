@@ -1,3 +1,4 @@
+import { DatabaseSync } from "node:sqlite";
 import { test, expect } from "@playwright/test";
 import { ALICE, failOnConsoleErrors, gotoHydrated, submitLogin } from "./helpers";
 
@@ -27,4 +28,10 @@ test("repeated failures are throttled per IP, even for the right password", asyn
   // A different username from the same IP is blocked too.
   expect(await attempt(ALICE.username, ALICE.password)).toMatch(/^Too many failed attempts/);
   await expect(page).toHaveURL("/login");
+
+  // Blocked attempts add nothing to the audit log.
+  const db = new DatabaseSync("../data/e2e.db", { readOnly: true });
+  const rows = db.prepare("SELECT count(*) AS n FROM audit_log WHERE action = 'login_throttled'").get();
+  db.close();
+  expect(rows).toMatchObject({ n: 0 });
 });

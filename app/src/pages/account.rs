@@ -2,7 +2,9 @@ use leptos::prelude::*;
 use leptos_meta::Title;
 use leptos_router::components::Redirect;
 
+use super::{action_error, FormError, FormSuccess};
 use crate::{
+    account::ResendVerification,
     auth::{account_overview, error_text, AccountProfile},
     plans::{my_plan, PlanInfo, ServiceHealth},
 };
@@ -84,7 +86,8 @@ fn PlanView(plan: PlanInfo) -> impl IntoView {
 
 #[component]
 fn AccountView(account: AccountProfile) -> impl IntoView {
-    let AccountProfile { username, display_name, email, member_since, .. } = account;
+    let AccountProfile { username, display_name, email, email_verified, member_since, .. } =
+        account;
 
     view! {
         <section class="card">
@@ -93,10 +96,34 @@ fn AccountView(account: AccountProfile) -> impl IntoView {
                 <dt>"Username"</dt>
                 <dd>{username}</dd>
                 <dt>"Email"</dt>
-                <dd>{email}</dd>
+                <dd>
+                    {email}
+                    {(!email_verified)
+                        .then(|| view! { " " <span class="status status-pending">"Not verified"</span> })}
+                </dd>
                 <dt>"Member since"</dt>
                 <dd>{member_since}</dd>
             </dl>
+            {(!email_verified).then(|| view! { <VerifyEmail/> })}
         </section>
+    }
+}
+
+#[component]
+fn VerifyEmail() -> impl IntoView {
+    let resend = ServerAction::<ResendVerification>::new();
+    let sent = Signal::derive(move || resend.value().get().and_then(Result::ok));
+
+    view! {
+        <div class="verify-email stack">
+            <p class="muted">"Open the link we emailed to this address to verify it."</p>
+            <ActionForm action=resend attr:class="stack">
+                <FormSuccess message=sent/>
+                <FormError message=action_error(resend.value())/>
+                <button type="submit" disabled=move || resend.pending().get()>
+                    "Send verification link"
+                </button>
+            </ActionForm>
+        </div>
     }
 }

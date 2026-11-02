@@ -1,3 +1,4 @@
+import { DatabaseSync } from "node:sqlite";
 import { test, expect } from "@playwright/test";
 import { ALICE, BOB, failOnConsoleErrors, gotoHydrated, login, submitLogin } from "./helpers";
 
@@ -70,6 +71,61 @@ test.describe("without JavaScript", () => {
     await page.waitForURL("/");
     await expect(page.getByRole("heading", { name: "Alice Example" })).toBeVisible();
   });
+});
+
+test("a username that can't exist isn't written to the audit log", async ({ page, request }) => {
+  await page.goto("/login");
+  const action = await page.locator("form").getAttribute("action");
+  const username = `longprobe${"a".repeat(100_000)}`;
+
+  const response = await request.post(action!, { form: { username, password: "x" } });
+  expect(await response.text()).toContain("Invalid username or password.");
+
+  const db = new DatabaseSync("../data/e2e.db", { readOnly: true });
+  const rows = db.prepare("SELECT count(*) AS n FROM audit_log WHERE target LIKE 'longprobe%'").get();
+  db.close();
+  expect(rows).toMatchObject({ n: 0 });
+});
+
+test("failures from one IP don't lock the user out elsewhere, but many IPs do", async ({ page, request }) => {
+  await page.goto("/login");
+  const action = (await page.locator("form").getAttribute("action"))!;
+  const attempt = async (ip: string, username: string, password: string) =>
+    (
+      await request.post(action, {
+        headers: { "X-Forwarded-For": ip },
+        form: { username, password },
+        maxRedirects: 0,
+      })
+    ).text();
+  const BLOCKED = "Too many failed attempts";
+
+  // The attacker's IP gets blocked; Alice's own still works.
+  for (let i = 0; i < 5; i++) await attempt("203.0.113.1", ALICE.username, "wrong");
+  expect(await attempt("203.0.113.1", ALICE.username, ALICE.password)).toContain(BLOCKED);
+  expect(await attempt("203.0.113.2", ALICE.username, ALICE.password)).not.toContain(BLOCKED);
+
+  // Guessing one username from many IPs hits the per-username limit (10 × 5).
+  for (let i = 0; i < 50; i++) await attempt(`198.51.100.${i}`, "distributedtarget", "wrong");
+  expect(await attempt("198.51.100.200", "distributedtarget", "wrong")).toContain(BLOCKED);
+});
+
+test("logging in to your own account doesn't reset the IP's failure count", async ({ page, request }) => {
+  await page.goto("/login");
+  const action = (await page.locator("form").getAttribute("action"))!;
+  const attempt = async (username: string, password: string) =>
+    (
+      await request.post(action, {
+        headers: { "X-Forwarded-For": "203.0.113.3" },
+        form: { username, password },
+        maxRedirects: 0,
+      })
+    ).text();
+
+  for (let i = 0; i < 4; i++) await attempt("guessedtarget", "wrong");
+  expect(await attempt(BOB.username, BOB.password)).not.toContain("Too many failed attempts");
+  await attempt("guessedtarget", "wrong");
+  expect(await attempt("guessedtarget", "wrong")).toContain("Too many failed attempts");
 });
 
 test("cross-origin form posts are refused", async ({ page, request }) => {

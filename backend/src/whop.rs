@@ -393,7 +393,8 @@ pub async fn apply_membership(
 }
 
 /// Finds the account a membership belongs to: the user id from checkout
-/// metadata, then an existing link, then an LLDAP account with the same email.
+/// metadata, then an existing link, then an LLDAP account with the same
+/// email, if that account has verified it.
 async fn match_user(state: &AppState, info: &MembershipInfo) -> Result<Option<String>, String> {
     if let Some(user_id) = &info.metadata_user_id {
         let user = state
@@ -423,10 +424,19 @@ async fn match_user(state: &AppState, info: &MembershipInfo) -> Result<Option<St
         if let Some(username) = username {
             let user = state
                 .users
-                .ensure(&username)
+                .find_by_username(&username)
                 .await
-                .map_err(|error| format!("user mirror failed: {error}"))?;
-            return Ok(Some(user.id));
+                .map_err(|error| format!("loading user failed: {error}"))?;
+            // Users can set any address in LLDAP, so it only proves the
+            // purchase is theirs once they've verified it. The reconcile
+            // links it after they do.
+            match user {
+                Some(user) if user.has_verified(email) => return Ok(Some(user.id)),
+                _ => log::warn!(
+                    "Whop membership {} has {username}'s email, which they haven't verified",
+                    info.id
+                ),
+            }
         }
     }
     Ok(None)

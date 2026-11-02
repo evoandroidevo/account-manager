@@ -39,6 +39,7 @@ session:
 auth:
   # LLDAP group whose members see the admin pages
   admin_group: admins
+  # Failed logins allowed per IP; each username allows 10 times this from anywhere
   login_max_attempts: 5
   login_window_minutes: 15
 

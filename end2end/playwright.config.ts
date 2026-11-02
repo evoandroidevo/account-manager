@@ -79,6 +79,8 @@ export default defineConfig({
         APP_CONFIG: "end2end/e2e-config.yaml",
         APP__DATABASE__URL: "sqlite://./data/e2e.db",
         APP__SERVER__PUBLIC_URL: BASE_URL,
+        // Lets tests log in "from" different IPs.
+        APP__SERVER__TRUST_PROXY_HEADERS: "true",
         APP__SESSION__SECURE_COOKIE: "false",
         APP__AUTH__LOGIN_MAX_ATTEMPTS: "5",
         APP__MAIL__TRANSPORT: "file",
