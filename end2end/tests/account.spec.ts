@@ -1,3 +1,4 @@
+import { createHash, randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import { test, expect } from "@playwright/test";
 import {
@@ -123,4 +124,30 @@ test("changing the email needs the link sent to the new address", async ({ page,
   await gotoHydrated(page, "/");
   await expect(page.locator("dl.details")).toContainText(newEmail);
   await waitForEmail(user.email, "Your email address was changed");
+});
+
+test("a link for the current address only verifies it", async ({ page, browser }) => {
+  const user = await signUpNewUser(browser);
+
+  // Nothing in the app sends such a link yet, so store one directly.
+  const token = "VerifyCurrentAddressToken0123456";
+  // Waits out the server's writes instead of failing with "database is locked".
+  const db = new DatabaseSync("../data/e2e.db", { timeout: 5000 });
+  db.prepare(
+    `INSERT INTO email_changes (id, user_id, new_email, token_hash, created_at, expires_at)
+     SELECT ?, id, ?, ?, '2000-01-01T00:00:00+00:00', '2999-01-01T00:00:00+00:00'
+     FROM users WHERE username = ?`,
+  ).run(randomUUID(), user.email, createHash("sha256").update(token).digest("hex"), user.username);
+
+  await gotoHydrated(page, `/confirm-email?token=${token}`);
+  await page.getByRole("button", { name: "Confirm change" }).click();
+  await expect(page.getByRole("heading", { name: "Email updated" })).toBeVisible();
+
+  const verified = db.prepare("SELECT verified_email FROM users WHERE username = ?").get(user.username);
+  const audit = db
+    .prepare("SELECT action FROM audit_log WHERE actor = ? AND action LIKE 'email_%'")
+    .all(user.username);
+  db.close();
+  expect(verified).toMatchObject({ verified_email: user.email });
+  expect(audit).toEqual([{ action: "email_verified" }]);
 });

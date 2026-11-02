@@ -550,6 +550,19 @@ pub async fn confirm_email_change(
     }
 
     let apply = async {
+        let old_email = state
+            .lldap
+            .get_user(&user.username)
+            .await
+            .map_err(|error| internal("LLDAP lookup failed", error))?
+            .map(|profile| profile.email);
+        // A link for the address the account already has only verifies it.
+        if old_email
+            .as_deref()
+            .is_some_and(|email| email.eq_ignore_ascii_case(&change.new_email))
+        {
+            return Ok(None);
+        }
         if state
             .lldap
             .email_exists(&change.new_email)
@@ -558,22 +571,17 @@ pub async fn confirm_email_change(
         {
             return Err(rejected("That email address is now used by another account."));
         }
-        let old_email = state
-            .lldap
-            .get_user(&user.username)
-            .await
-            .map_err(|error| internal("LLDAP lookup failed", error))?
-            .map(|profile| profile.email);
         state
             .lldap
             .update_email(&user.username, &change.new_email)
             .await
             .map_err(|error| internal("updating email failed", error))?;
-        Ok::<_, AccountError>(old_email)
+        Ok::<_, AccountError>(Some(old_email))
     };
 
-    let old_email = match apply.await {
-        Ok(old_email) => old_email,
+    // `None` when the address didn't change; otherwise the previous one, if any.
+    let replaced = match apply.await {
+        Ok(replaced) => replaced,
         Err(error) => {
             // Let the user retry the same link after a transient failure.
             if matches!(error, AccountError::Internal(_)) {
@@ -588,6 +596,22 @@ pub async fn confirm_email_change(
     if let Err(error) = state.users.set_verified_email(&user.id, &change.new_email).await {
         log::error!("could not record {}'s verified email: {error}", user.username);
     }
+
+    let Some(old_email) = replaced else {
+        state
+            .audit
+            .record_best_effort(
+                Some(&user.username),
+                "email_verified",
+                None,
+                Some(serde_json::json!({ "email": change.new_email })),
+            )
+            .await;
+        return Ok(PendingEmailChange {
+            username: user.username,
+            new_email: change.new_email,
+        });
+    };
 
     state
         .audit
