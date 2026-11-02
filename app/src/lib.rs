@@ -1,7 +1,7 @@
 use leptos::prelude::*;
 use leptos_meta::{provide_meta_context, MetaTags, Stylesheet, Title};
 use leptos_router::{
-    components::{ParentRoute, Route, Router, Routes},
+    components::{ParentRoute, Redirect, Route, Router, Routes},
     SsrMode, StaticSegment,
 };
 
@@ -17,8 +17,7 @@ pub mod server;
 use pages::{
     account::AccountPage, admin_invites::AdminInvitesPage, admin_payments::AdminPaymentsPage,
     admin_users::AdminUsersPage, billing::BillingPage, confirm_email::ConfirmEmailPage,
-    email::EmailPage, invite::InvitePage, layout::ProtectedLayout, login::LoginPage,
-    security::SecurityPage,
+    invite::InvitePage, layout::ProtectedLayout, login::LoginPage, settings::SettingsPage,
 };
 
 pub fn shell(options: LeptosOptions) -> impl IntoView {
@@ -60,8 +59,18 @@ pub fn App() -> impl IntoView {
                     // check, so logged-out visitors get a real HTTP redirect.
                     <ParentRoute path=StaticSegment("") view=ProtectedLayout ssr=SsrMode::Async>
                         <Route path=StaticSegment("") view=AccountPage ssr=SsrMode::Async/>
-                        <Route path=StaticSegment("security") view=SecurityPage ssr=SsrMode::Async/>
-                        <Route path=StaticSegment("email") view=EmailPage ssr=SsrMode::Async/>
+                        <Route path=StaticSegment("settings") view=SettingsPage ssr=SsrMode::Async/>
+                        // The old separate pages, for bookmarks.
+                        <Route
+                            path=StaticSegment("security")
+                            view=|| view! { <Redirect path="/settings"/> }
+                            ssr=SsrMode::Async
+                        />
+                        <Route
+                            path=StaticSegment("email")
+                            view=|| view! { <Redirect path="/settings"/> }
+                            ssr=SsrMode::Async
+                        />
                         <Route path=StaticSegment("billing") view=BillingPage ssr=SsrMode::Async/>
                         <Route
                             path=(StaticSegment("admin"), StaticSegment("payments"))

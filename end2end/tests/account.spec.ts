@@ -1,6 +1,7 @@
 import { DatabaseSync } from "node:sqlite";
 import { test, expect } from "@playwright/test";
 import {
+  ALICE,
   failOnConsoleErrors,
   gotoHydrated,
   jellyfinLogin,
@@ -16,6 +17,16 @@ failOnConsoleErrors();
 
 // These tests use freshly signed-up accounts so the seed users never change.
 
+test("the old password and email pages lead to settings", async ({ page }) => {
+  await login(page, ALICE.username, ALICE.password);
+  for (const path of ["/security", "/email"]) {
+    await gotoHydrated(page, path);
+    await expect(page).toHaveURL("/settings");
+    await expect(page.getByRole("heading", { name: "Email" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Password" })).toBeVisible();
+  }
+});
+
 test("changing the password signs out other sessions but keeps this one", async ({
   page,
   browser,
@@ -27,14 +38,15 @@ test("changing the password signs out other sessions but keeps this one", async 
   await login(otherDevice, user.username, user.password);
 
   await login(page, user.username, user.password);
-  await page.getByRole("link", { name: "Password" }).click();
-  await expect(page).toHaveURL("/security");
-  const alert = page.getByRole("alert");
+  await page.getByRole("link", { name: "Settings" }).click();
+  await expect(page).toHaveURL("/settings");
+  const card = page.getByTestId("password-settings");
+  const alert = card.getByRole("alert");
   const change = async (current: string, next: string, confirm = next) => {
-    await page.getByLabel("Current password").fill(current);
-    await page.getByLabel("New password", { exact: true }).fill(next);
-    await page.getByLabel("Confirm new password").fill(confirm);
-    await page.getByRole("button", { name: "Change password" }).click();
+    await card.getByLabel("Current password").fill(current);
+    await card.getByLabel("New password", { exact: true }).fill(next);
+    await card.getByLabel("Confirm new password").fill(confirm);
+    await card.getByRole("button", { name: "Change password" }).click();
   };
 
   await change("not-my-password", newPassword);
@@ -45,16 +57,16 @@ test("changing the password signs out other sessions but keeps this one", async 
   await expect(alert).toContainText("at least 12 characters");
 
   await change(user.password, newPassword);
-  await expect(page.getByRole("status")).toHaveText(
+  await expect(card.getByRole("status")).toHaveText(
     "Password changed. You've been signed out of this site on your other devices.",
   );
-  await expect(page.getByLabel("Current password")).toHaveValue("");
+  await expect(card.getByLabel("Current password")).toHaveValue("");
 
   // This session survives; the other one is gone. The other device notices
   // on its next page change, without needing a reload.
   await gotoHydrated(page, "/");
   await expect(page).toHaveURL("/");
-  await otherDevice.getByRole("link", { name: "Email" }).click();
+  await otherDevice.getByRole("link", { name: "Settings" }).click();
   await expect(otherDevice).toHaveURL("/login");
 
   // The new password works and the old one doesn't.
@@ -78,22 +90,23 @@ test("changing the email needs the link sent to the new address", async ({ page,
   const newEmail = uniqueUser().email;
 
   await login(page, user.username, user.password);
-  await page.getByRole("link", { name: "Email" }).click();
-  await expect(page).toHaveURL("/email");
-  await expect(page.getByText(`Your current address is ${user.email}`)).toBeVisible();
+  await page.getByRole("link", { name: "Settings" }).click();
+  await expect(page).toHaveURL("/settings");
+  const card = page.getByTestId("email-settings");
+  await expect(card.getByText(`Your current address is ${user.email}`)).toBeVisible();
 
   const request = async (email: string, password: string) => {
-    await page.getByLabel("New email address").fill(email);
-    await page.getByLabel("Current password").fill(password);
-    await page.getByRole("button", { name: "Send confirmation link" }).click();
+    await card.getByLabel("New email address").fill(email);
+    await card.getByLabel("Current password").fill(password);
+    await card.getByRole("button", { name: "Send confirmation link" }).click();
   };
 
   await request(user.email, user.password);
-  await expect(page.getByRole("alert")).toHaveText("That is already your email address.");
+  await expect(card.getByRole("alert")).toHaveText("That is already your email address.");
   await request(newEmail, "not-my-password");
-  await expect(page.getByRole("alert")).toHaveText("Your current password is incorrect.");
+  await expect(card.getByRole("alert")).toHaveText("Your current password is incorrect.");
   await request(newEmail, user.password);
-  await expect(page.getByRole("status")).toHaveText(
+  await expect(card.getByRole("status")).toHaveText(
     `We sent a confirmation link to ${newEmail}. It expires in 24 hours.`,
   );
 
