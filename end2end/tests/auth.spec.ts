@@ -110,6 +110,24 @@ test("failures from one IP don't lock the user out elsewhere, but many IPs do", 
   expect(await attempt("198.51.100.200", "distributedtarget", "wrong")).toContain(BLOCKED);
 });
 
+test("logging in to your own account doesn't reset the IP's failure count", async ({ page, request }) => {
+  await page.goto("/login");
+  const action = (await page.locator("form").getAttribute("action"))!;
+  const attempt = async (username: string, password: string) =>
+    (
+      await request.post(action, {
+        headers: { "X-Forwarded-For": "203.0.113.3" },
+        form: { username, password },
+        maxRedirects: 0,
+      })
+    ).text();
+
+  for (let i = 0; i < 4; i++) await attempt("guessedtarget", "wrong");
+  expect(await attempt(BOB.username, BOB.password)).not.toContain("Too many failed attempts");
+  await attempt("guessedtarget", "wrong");
+  expect(await attempt("guessedtarget", "wrong")).toContain("Too many failed attempts");
+});
+
 test("cross-origin form posts are refused", async ({ page, request }) => {
   await page.goto("/login");
   const action = await page.locator("form").getAttribute("action");

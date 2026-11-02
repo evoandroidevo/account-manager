@@ -90,7 +90,8 @@ pub async fn login(username: String, password: String) -> Result<(), ServerFnErr
         return Err(ServerFnError::new("This account has been disabled."));
     }
 
-    state.login_throttle.clear(&ip_keys);
+    // Not the IP's count: logging in to one's own account mustn't reset the
+    // limit on guessing other people's passwords.
     state.username_throttle.clear(&user_keys);
     if let Err(error) = state.users.touch_login(&user.id).await {
         log::warn!("failed to record login time for {username}: {error}");
