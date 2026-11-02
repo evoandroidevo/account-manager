@@ -167,6 +167,15 @@ export async function waitForEmails(to: string, subject: string, count: number):
   return found;
 }
 
+/** Opens the verification link sent at signup, in `page`. */
+export async function verifyEmail(page: Page, user: NewUser) {
+  const mail = await waitForEmail(user.email, "Verify your email address");
+  const link = mail.match(/http:\/\/127\.0\.0\.1:3000\/confirm-email\?token=[A-Za-z0-9]{32}/)![0];
+  await gotoHydrated(page, link);
+  await page.getByRole("button", { name: "Confirm change" }).click();
+  await expect(page.getByRole("heading", { name: "Email updated" })).toBeVisible();
+}
+
 // --- Dev Jellyfin and Seerr (set up by end2end/services.mjs) -----------------
 
 type Services = { jellyfin: { url: string; apiKey: string }; seerr: { url: string; apiKey: string } };

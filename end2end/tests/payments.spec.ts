@@ -10,6 +10,7 @@ import {
   signedWebhook,
   signUpNewUser,
   uniqueUser,
+  verifyEmail,
 } from "./helpers";
 
 failOnConsoleErrors();
@@ -102,4 +103,24 @@ test("a payment that can't be matched waits for an admin to assign it", async ({
   await gotoHydrated(userPage, "/billing");
   await expect(userPage.getByTestId("current-plan")).toContainText("Your plan: Plus");
   await userPage.close();
+});
+
+test("a payment is matched by email only once the account has verified it", async ({ page, browser }) => {
+  // Anyone can put any address on their account, so before verifying this
+  // could just as well be someone else's purchase.
+  const user = await signUpNewUser(browser);
+  const bought = await mockWhop("/test/memberships", { plan_id: "plan_plus", email: user.email });
+  expect(bought.webhook_status).toBe(200);
+
+  await login(page, user.username, user.password);
+  await gotoHydrated(page, "/billing");
+  const current = page.getByTestId("current-plan");
+  await expect(current).toContainText("Your plan: Free");
+
+  await verifyEmail(page, user);
+
+  // The next time the membership is applied (a webhook or the reconcile), it matches.
+  expect((await mockWhop(`/test/memberships/${bought.id}/resend`)).webhook_status).toBe(200);
+  await gotoHydrated(page, "/billing");
+  await expect(current).toContainText("Your plan: Plus");
 });

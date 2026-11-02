@@ -8,6 +8,7 @@ import {
   mockWhop,
   mockWhopGet,
   signUpNewUser,
+  verifyEmail,
 } from "./helpers";
 
 failOnConsoleErrors();
@@ -88,7 +89,8 @@ test("repeated upgrade clicks reuse one credit, and any higher plan retires the 
   expect((await mockWhopGet("/test/promo_codes")).length).toBe(before + 1);
 
   // Premium bought on Whop directly (no replaces_membership metadata) still
-  // cancels Plus.
+  // cancels Plus. It's matched by email, which has to be verified for that.
+  await verifyEmail(page, user);
   const premium = await mockWhop("/test/memberships", { plan_id: "plan_premium", email: user.email });
   expect(premium.webhook_status).toBe(200);
   await expect.poll(async () => (await mockWhopGet(`/test/memberships/${plus}`)).status, SYNC).toBe("canceled");
