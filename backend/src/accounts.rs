@@ -36,6 +36,10 @@ const MAX_INVITE_HOURS: i64 = 24 * 30;
 const INVALID_INVITE: &str = "This invitation link is invalid or has expired.";
 const INVALID_EMAIL_LINK: &str = "This confirmation link is invalid or has expired.";
 
+/// Verification emails a user can ask for per `VERIFICATION_WINDOW`.
+pub const VERIFICATION_MAX_SENDS: usize = 3;
+pub const VERIFICATION_WINDOW: std::time::Duration = std::time::Duration::from_secs(60 * 60);
+
 /// 32 random alphanumeric characters (~190 bits). Only the hash is stored.
 pub fn generate_token() -> String {
     rand::rng()
@@ -306,8 +310,12 @@ pub async fn signup(
     }
 
     // Nothing checked the address the user typed, so it stays unverified
-    // until they open this link.
-    send_verification_link(state, &user.id, &username, &first_name, &email).await;
+    // until they open this link. Not a reason to fail: they can ask for
+    // another link from their account page.
+    if let Err(error) = send_verification_link(state, &user.id, &username, &first_name, &email).await
+    {
+        log::error!("could not send {username} a verification link: {error}");
+    }
 
     state
         .audit
@@ -377,34 +385,74 @@ async fn store_email_link(
     ))
 }
 
-/// Mails a link that verifies the account's current address. Failures are
-/// logged, not returned: the user can ask for another link.
+/// Mails a link that verifies the account's current address.
 async fn send_verification_link(
     state: &AppState,
     user_id: &str,
     username: &str,
     name: &str,
     email: &str,
-) {
-    let link = match store_email_link(state, user_id, email).await {
-        Ok(link) => link,
-        Err(error) => {
-            log::error!("could not create a verification link for {username}: {error}");
-            return;
-        }
-    };
+) -> Result<(), AccountError> {
+    let link = store_email_link(state, user_id, email).await?;
     let hours = state.config.mail.email_change_link_hours;
-    notify(
-        state,
-        email,
-        "Verify your email address",
-        format!(
-            "Hi {name},\n\nConfirm that this is the email address for your account \
-             \"{username}\" by opening the link below. It expires in {hours} hours.\n\n\
-             {link}\n\nIf you didn't create this account, you can ignore this email.\n"
-        ),
-    )
-    .await;
+    state
+        .mailer
+        .send(
+            email,
+            "Verify your email address",
+            format!(
+                "Hi {name},\n\nConfirm that this is the email address for your account \
+                 \"{username}\" by opening the link below. It expires in {hours} hours.\n\n\
+                 {link}\n\nIf you didn't ask for this, you can ignore this email.\n"
+            ),
+        )
+        .await
+        .map_err(|error| internal("sending verification email failed", error))
+}
+
+/// Mails a new verification link for the account's current address and
+/// returns that address.
+pub async fn resend_verification(
+    state: &AppState,
+    user_id: &str,
+    username: &str,
+) -> Result<String, AccountError> {
+    let user = state
+        .users
+        .find_by_id(user_id)
+        .await
+        .map_err(|error| internal("user lookup failed", error))?
+        .ok_or_else(|| internal("user lookup failed", "user not found"))?;
+    let profile = state
+        .lldap
+        .get_user(username)
+        .await
+        .map_err(|error| internal("LLDAP lookup failed", error))?
+        .ok_or_else(|| internal("LLDAP lookup failed", "user not found"))?;
+    if user.has_verified(&profile.email) {
+        return Err(rejected("Your email address is already verified."));
+    }
+
+    // Each press sends an email, so it needs a limit of its own.
+    let keys = [format!("verify:{user_id}")];
+    if state.verification_throttle.is_blocked(&keys) {
+        return Err(rejected(
+            "We've sent several links recently. Check your inbox and spam folder, or try again later.",
+        ));
+    }
+    state.verification_throttle.record_failure(&keys);
+
+    send_verification_link(state, user_id, username, &profile.display_name, &profile.email).await?;
+    state
+        .audit
+        .record_best_effort(
+            Some(username),
+            "email_verification_sent",
+            None,
+            Some(serde_json::json!({ "email": profile.email })),
+        )
+        .await;
+    Ok(profile.email)
 }
 
 /// Sends a security notice, logging (not failing) if delivery breaks.

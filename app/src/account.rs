@@ -69,6 +69,20 @@ pub async fn request_email_change(
     ))
 }
 
+/// Emails a new link that verifies the current address. Returns the message to show.
+#[server]
+pub async fn resend_verification() -> Result<String, ServerFnError> {
+    let ctx = ctx()?;
+    let user = ctx.require_user().await?;
+    let email = backend::accounts::resend_verification(&ctx.state, &user.user_id, &user.username)
+        .await
+        .map_err(account_error)?;
+    Ok(format!(
+        "We sent a verification link to {email}. It expires in {} hours.",
+        ctx.state.config.mail.email_change_link_hours
+    ))
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct EmailChangeInfo {
     pub username: String,

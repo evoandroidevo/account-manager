@@ -145,6 +145,28 @@ export async function waitForEmail(to: string, subject: string): Promise<string>
   return found;
 }
 
+/** Waits until there are `count` emails to `to` with `subject`; returns them oldest first. */
+export async function waitForEmails(to: string, subject: string, count: number): Promise<string[]> {
+  let found: string[] = [];
+  await expect
+    .poll(
+      () => {
+        if (!fs.existsSync(OUTBOX)) return 0;
+        found = fs
+          .readdirSync(OUTBOX)
+          .map((file) => path.join(OUTBOX, file))
+          .map((file) => ({ raw: fs.readFileSync(file, "utf8"), sent: fs.statSync(file).mtimeMs }))
+          .filter(({ raw }) => raw.includes(`To: ${to}`) && raw.includes(`Subject: ${subject}`))
+          .sort((a, b) => a.sent - b.sent)
+          .map(({ raw }) => decodeQuotedPrintable(raw));
+        return found.length;
+      },
+      { message: `${count} emails "${subject}" to ${to}`, timeout: 5000 },
+    )
+    .toBe(count);
+  return found;
+}
+
 // --- Dev Jellyfin and Seerr (set up by end2end/services.mjs) -----------------
 
 type Services = { jellyfin: { url: string; apiKey: string }; seerr: { url: string; apiKey: string } };

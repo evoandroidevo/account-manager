@@ -9,6 +9,7 @@ import {
   submitLogin,
   uniqueUser,
   waitForEmail,
+  waitForEmails,
 } from "./helpers";
 
 failOnConsoleErrors();
@@ -145,4 +146,42 @@ test("signing up mails a link that verifies the address", async ({ page, browser
   db.close();
   expect(verified).toMatchObject({ verified_email: user.email });
   expect(audit).toEqual([{ action: "email_verified" }]);
+});
+
+test("the account page sends new verification links until the address is verified", async ({
+  page,
+  browser,
+}) => {
+  const user = await signUpNewUser(browser);
+  const subject = "Verify your email address";
+  const linkIn = (mail: string) =>
+    mail.match(/http:\/\/127\.0\.0\.1:3000\/confirm-email\?token=[A-Za-z0-9]{32}/)![0];
+
+  await login(page, user.username, user.password);
+  await expect(page.locator("dl.details")).toContainText("Not verified");
+  const send = page.getByRole("button", { name: "Send verification link" });
+
+  // Three an hour, on top of the one from signup.
+  for (let sent = 1; sent <= 3; sent++) {
+    await send.click();
+    await waitForEmails(user.email, subject, sent + 1);
+  }
+  await expect(page.getByRole("status")).toHaveText(
+    `We sent a verification link to ${user.email}. It expires in 24 hours.`,
+  );
+  await send.click();
+  await expect(page.getByRole("alert")).toContainText("We've sent several links recently.");
+
+  // Only the newest link works.
+  const mails = await waitForEmails(user.email, subject, 4);
+  await gotoHydrated(page, linkIn(mails[0]));
+  await expect(page.getByRole("heading", { name: "Link not valid" })).toBeVisible();
+  await gotoHydrated(page, linkIn(mails[3]));
+  await page.getByRole("button", { name: "Confirm change" }).click();
+  await expect(page.getByRole("heading", { name: "Email updated" })).toBeVisible();
+
+  await gotoHydrated(page, "/");
+  await expect(page.locator("dl.details")).toContainText(user.email);
+  await expect(page.locator("dl.details")).not.toContainText("Not verified");
+  await expect(send).toHaveCount(0);
 });

@@ -21,6 +21,15 @@ pub struct UserRecord {
     pub email_verified_at: Option<String>,
 }
 
+impl UserRecord {
+    /// Whether `email` (the account's address in LLDAP) is the one verified.
+    pub fn has_verified(&self, email: &str) -> bool {
+        self.verified_email
+            .as_deref()
+            .is_some_and(|verified| verified.eq_ignore_ascii_case(email))
+    }
+}
+
 const USER_COLUMNS: &str = "id, username, created_at, last_login_at, disabled_at, \
      password_changed_at, verified_email, email_verified_at";
 
@@ -160,5 +169,7 @@ mod tests {
             .expect("user should exist");
         assert_eq!(user.verified_email.as_deref(), Some("carol@example.com"));
         assert!(user.email_verified_at.is_some());
+        assert!(user.has_verified("Carol@Example.com"));
+        assert!(!user.has_verified("someone@example.com"));
     }
 }

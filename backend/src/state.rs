@@ -37,6 +37,7 @@ pub struct AppState {
     pub whop_client: Option<WhopClient>,
     pub login_throttle: LoginThrottle,
     pub checkout_throttle: LoginThrottle,
+    pub verification_throttle: LoginThrottle,
 }
 
 impl AppState {
@@ -80,6 +81,10 @@ impl AppState {
             checkout_throttle: LoginThrottle::new(
                 crate::plan_change::CHECKOUT_MAX_ATTEMPTS,
                 crate::plan_change::CHECKOUT_WINDOW,
+            ),
+            verification_throttle: LoginThrottle::new(
+                crate::accounts::VERIFICATION_MAX_SENDS,
+                crate::accounts::VERIFICATION_WINDOW,
             ),
             config: Arc::new(config),
             pool,
