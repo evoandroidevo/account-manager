@@ -64,9 +64,8 @@ fn Chrome(user: CurrentUser) -> impl IntoView {
                 <A href="/" exact=true>
                     "Overview"
                 </A>
-                <A href="/security">"Password"</A>
-                <A href="/email">"Email"</A>
                 <A href="/billing">"Plan"</A>
+                <A href="/settings">"Settings"</A>
                 {is_admin
                     .then(|| {
                         view! {

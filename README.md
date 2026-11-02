@@ -217,8 +217,7 @@ Authelia; the signature is its authentication.
 | `/invite?code=…` | anyone with an invite | create an account; logs straight in |
 | `/` | user | profile, plan and service status |
 | `/billing` | user | compare plans, buy one through Whop, manage the subscription |
-| `/security` | user | change password (signs out other devices) |
-| `/email` | user | change email via a link sent to the new address |
+| `/settings` | user | change email via a link sent to the new address; change password (signs out other devices). `/security` and `/email` redirect here |
 | `/confirm-email?token=…` | link holder | confirm an email change |
 | `/admin/users` | `auth.admin_group` | every user's plan and sync status; set or remove a manual plan, resync |
 | `/admin/invites` | `auth.admin_group` | create, list and revoke invite links |

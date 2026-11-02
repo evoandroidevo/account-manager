@@ -64,7 +64,7 @@ pub fn ConfirmEmailPage() -> impl IntoView {
                                     <h1>"Link not valid"</h1>
                                     <p class="form-error">
                                         "This confirmation link is invalid, expired, or already used. "
-                                        "Request a new one from your account's email page."
+                                        "Request a new one from your account's settings page."
                                     </p>
                                 }
                                     .into_any()

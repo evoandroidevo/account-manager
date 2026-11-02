@@ -4,7 +4,7 @@ import { ALICE, BOB, failOnConsoleErrors, gotoHydrated, login, submitLogin } fro
 failOnConsoleErrors();
 
 test("logged-out visitors are sent to the login page", async ({ page }) => {
-  for (const path of ["/", "/security", "/email", "/admin/invites"]) {
+  for (const path of ["/", "/settings", "/security", "/email", "/admin/invites"]) {
     await gotoHydrated(page, path);
     await expect(page).toHaveURL("/login");
   }
