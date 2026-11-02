@@ -583,6 +583,12 @@ pub async fn confirm_email_change(
         }
     };
 
+    // Not a reason to fail: LLDAP already has the new address. Until this is
+    // recorded the address only counts as unverified.
+    if let Err(error) = state.users.set_verified_email(&user.id, &change.new_email).await {
+        log::error!("could not record {}'s verified email: {error}", user.username);
+    }
+
     state
         .audit
         .record_best_effort(

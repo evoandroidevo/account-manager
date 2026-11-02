@@ -1,3 +1,4 @@
+import { DatabaseSync } from "node:sqlite";
 import { test, expect } from "@playwright/test";
 import {
   failOnConsoleErrors,
@@ -109,6 +110,11 @@ test("changing the email needs the link sent to the new address", async ({ page,
   await expect(confirmPage.getByText(`to ${newEmail}?`)).toBeVisible();
   await confirmPage.getByRole("button", { name: "Confirm change" }).click();
   await expect(confirmPage.getByRole("heading", { name: "Email updated" })).toBeVisible();
+
+  const db = new DatabaseSync("../data/e2e.db", { readOnly: true });
+  const row = db.prepare("SELECT verified_email FROM users WHERE username = ?").get(user.username);
+  db.close();
+  expect(row).toMatchObject({ verified_email: newEmail });
 
   await gotoHydrated(confirmPage, link!);
   await expect(confirmPage.getByRole("heading", { name: "Link not valid" })).toBeVisible();
