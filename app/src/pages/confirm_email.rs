@@ -16,6 +16,9 @@ pub fn ConfirmEmailPage() -> impl IntoView {
     let token = move || query.read().get("token").unwrap_or_default();
     let change = Resource::new(token, get_email_change);
     let confirm = ServerAction::<ConfirmEmailChange>::new();
+    // Created out here: a success removes the form, and a signal made inside
+    // it would be gone while the error display still reads it.
+    let confirm_error = action_error(confirm.value());
 
     view! {
         <Title text="Confirm email change"/>
@@ -51,7 +54,7 @@ pub fn ConfirmEmailPage() -> impl IntoView {
                                     </p>
                                     <ActionForm action=confirm attr:class="stack">
                                         <input type="hidden" name="token" value=token()/>
-                                        <FormError message=action_error(confirm.value())/>
+                                        <FormError message=confirm_error/>
                                         <button type="submit" disabled=move || confirm.pending().get()>
                                             "Confirm change"
                                         </button>
