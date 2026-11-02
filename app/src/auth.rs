@@ -27,6 +27,7 @@ pub struct AccountProfile {
     pub username: String,
     pub display_name: String,
     pub email: String,
+    pub email_verified: bool,
     pub member_since: String,
     pub is_admin: bool,
 }
@@ -149,9 +150,16 @@ pub async fn account_overview() -> Result<Option<AccountProfile>, ServerFnError>
         ctx.end_session().await?;
         return Ok(None);
     };
+    let record = ctx
+        .state
+        .users
+        .find_by_id(&user.user_id)
+        .await
+        .map_err(|error| internal(format!("user lookup for {} failed: {error}", user.username)))?;
 
     Ok(Some(AccountProfile {
         is_admin: profile.is_member_of(&ctx.state.config.auth.admin_group),
+        email_verified: record.is_some_and(|record| record.has_verified(&profile.email)),
         username: profile.id,
         display_name: profile.display_name,
         email: profile.email,

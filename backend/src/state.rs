@@ -40,6 +40,7 @@ pub struct AppState {
     /// limit, so strangers can't easily lock a user out.
     pub username_throttle: LoginThrottle,
     pub checkout_throttle: LoginThrottle,
+    pub verification_throttle: LoginThrottle,
 }
 
 impl AppState {
@@ -84,6 +85,10 @@ impl AppState {
             checkout_throttle: LoginThrottle::new(
                 crate::plan_change::CHECKOUT_MAX_ATTEMPTS,
                 crate::plan_change::CHECKOUT_WINDOW,
+            ),
+            verification_throttle: LoginThrottle::new(
+                crate::accounts::VERIFICATION_MAX_SENDS,
+                crate::accounts::VERIFICATION_WINDOW,
             ),
             config: Arc::new(config),
             pool,

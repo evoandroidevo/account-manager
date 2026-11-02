@@ -97,7 +97,7 @@ passed as variables. `APP_CONFIG` sets the config file path (default
 | `APP__MAIL__SMTP__USERNAME` | empty | SMTP username |
 | `APP__MAIL__SMTP__PASSWORD` 🔑 | empty | SMTP password |
 | `APP__MAIL__OUTBOX_DIR` | `./data/outbox` | Folder for `file` |
-| `APP__MAIL__EMAIL_CHANGE_LINK_HOURS` | `24` | Email-change link lifetime |
+| `APP__MAIL__EMAIL_CHANGE_LINK_HOURS` | `24` | Email-change and verification link lifetime |
 
 </details>
 
@@ -180,11 +180,13 @@ browser there. Whop then calls `POST /api/webhooks/whop`:
   HMAC-SHA256 keyed with the literal `ws_…` secret, 5-minute window), and each
   delivery id is processed once.
 - `membership.*` events are matched to an account by the checkout metadata,
-  then a known membership, then the account with the same email. The user's
-  best active membership sets their paid tier until the billing period ends
-  plus `grace_days`; cancelled or expired memberships remove it.
-- Memberships that match nobody (bought on Whop directly with another email)
-  wait on `/admin/payments` until an admin assigns them.
+  then a known membership, then the account with the same email, but only
+  if that account has verified it (users can put any address in LLDAP). The
+  user's best active membership sets their paid tier until the billing period
+  ends plus `grace_days`; cancelled or expired memberships remove it.
+- Memberships that match nobody (bought on Whop directly with another email,
+  or one not verified yet) wait on `/admin/payments` until an admin assigns
+  them. The daily reconcile links them once the address is verified.
 
 Changing plans (`backend/src/plan_change.rs`); Whop can't move a membership
 to another plan, so:
@@ -215,11 +217,11 @@ Authelia; the signature is its authentication.
 |---|---|---|
 | `/login` | anyone | LLDAP username and password |
 | `/invite?code=…` | anyone with an invite | create an account; logs straight in |
-| `/` | user | profile, plan and service status |
+| `/` | user | profile, plan and service status; resend the email verification link |
 | `/billing` | user | compare plans, buy one through Whop, manage the subscription |
 | `/security` | user | change password (signs out other devices) |
 | `/email` | user | change email via a link sent to the new address |
-| `/confirm-email?token=…` | link holder | confirm an email change |
+| `/confirm-email?token=…` | link holder | confirm an email change or verify the current address |
 | `/admin/users` | `auth.admin_group` | every user's plan and sync status; set or remove a manual plan, resync |
 | `/admin/invites` | `auth.admin_group` | create, list and revoke invite links |
 | `/admin/payments` | `auth.admin_group` | unmatched Whop memberships (assign to an account) and recent webhooks |

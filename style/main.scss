@@ -177,6 +177,14 @@ small {
 	color: var(--success);
 }
 
+.verify-email {
+	margin-top: 1rem;
+
+	p {
+		margin: 0;
+	}
+}
+
 .nav {
 	display: flex;
 	flex-wrap: wrap;
