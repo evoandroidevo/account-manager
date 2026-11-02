@@ -36,6 +36,9 @@ pub struct AppState {
     /// Present when `whop.enabled`.
     pub whop_client: Option<WhopClient>,
     pub login_throttle: LoginThrottle,
+    /// Failed logins per username from anywhere. Much looser than the per-IP
+    /// limit, so strangers can't easily lock a user out.
+    pub username_throttle: LoginThrottle,
     pub checkout_throttle: LoginThrottle,
 }
 
@@ -59,10 +62,10 @@ impl AppState {
             .await?;
         repo::migrate(&pool).await?;
 
-        let login_throttle = LoginThrottle::new(
-            config.auth.login_max_attempts,
-            Duration::from_secs(config.auth.login_window_minutes * 60),
-        );
+        let login_window = Duration::from_secs(config.auth.login_window_minutes * 60);
+        let login_throttle = LoginThrottle::new(config.auth.login_max_attempts, login_window);
+        let username_throttle =
+            LoginThrottle::new(config.auth.login_max_attempts.saturating_mul(10), login_window);
 
         Ok(Self {
             invites: InviteRepository::new(pool.clone()),
@@ -77,6 +80,7 @@ impl AppState {
             lldap: LldapClient::new(config.ldap.clone()),
             mailer: Mailer::new(&config.mail)?,
             login_throttle,
+            username_throttle,
             checkout_throttle: LoginThrottle::new(
                 crate::plan_change::CHECKOUT_MAX_ATTEMPTS,
                 crate::plan_change::CHECKOUT_WINDOW,
